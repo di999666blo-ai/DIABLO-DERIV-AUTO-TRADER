@@ -340,12 +340,25 @@ class MainActivity : AppCompatActivity() {
             maxTradesPerDay = tradesLimit,
             cooldownMillis = cooldownSeconds * 1000L
         )
-        controller = TradingController(api, config, { status ->
-            runOnUiThread { show(status) }
-        }, { record ->
-            runOnUiThread { saveTrade(record) }
-        })
-        controller?.start(selected, accountCurrency)
+        show("Checking Deriv for existing open positions before starting…")
+        api.portfolio { portfolioResult ->
+            runOnUiThread {
+                portfolioResult.onSuccess { response ->
+                    val contracts = response.optJSONObject("portfolio")?.optJSONArray("contracts")
+                    val openCount = contracts?.length() ?: 0
+                    if (openCount > 0) {
+                        show("Safety lock: Deriv reports $openCount open contract(s). Manage or close them in Deriv first; scanner will not add exposure.")
+                        return@onSuccess
+                    }
+                    controller = TradingController(api, config, { status ->
+                        runOnUiThread { show(status) }
+                    }, { record ->
+                        runOnUiThread { saveTrade(record) }
+                    })
+                    controller?.start(selected, accountCurrency)
+                }.onFailure { show("Could not verify open positions. Scanner blocked for safety: ${it.message}") }
+            }
+        }
     }
 
     private fun saveTrade(record: TradeRecord) {
