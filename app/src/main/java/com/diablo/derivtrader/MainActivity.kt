@@ -47,6 +47,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val splash = DiabloSplashView(this)
+        setContentView(splash)
+        splash.setProgress(12, "INITIALISING SECURE STORAGE")
         prefs = try {
             val key = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             EncryptedSharedPreferences.create(
@@ -59,10 +62,12 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
+        splash.setProgress(48, "CHECKING SAFETY SYSTEMS")
         realUnlocked = prefs.getBoolean("real_unlocked", false) &&
             prefs.getBoolean("demo_closed_trade_verified", false) && RiskManager.selfTest()
         if (!realUnlocked) prefs.edit().putBoolean("real_unlocked", false).apply()
         selectedMode = "demo"
+        splash.setProgress(72, "BUILDING TRADING TERMINAL")
         render()
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
@@ -445,7 +450,13 @@ class MainActivity : AppCompatActivity() {
         maxTrades.setText(prefs.getString("maxTrades", "20"))
         cooldown.setText(prefs.getString("cooldown", "30"))
         showHistory()
-        setContentView(root)
+        splash.setProgress(92, "STARTUP COMPLETE")
+        mainHandler.postDelayed({
+            if (!isFinishing && !isDestroyed) {
+                splash.setProgress(100, "SYSTEM READY")
+                setContentView(root)
+            }
+        }, 650L)
     }
 
     private fun requestRealUnlock() {
