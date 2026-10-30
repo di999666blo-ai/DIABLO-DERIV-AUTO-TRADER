@@ -1,6 +1,8 @@
 package com.diablo.derivtrader
 
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +35,10 @@ class MainActivity : AppCompatActivity() {
     private val markets = mutableListOf<Pair<String, String>>()
     private val selectedMarkets = linkedSetOf<String>()
     private var accountCurrency = "USD"
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var reconnectAttempts = 0
+    private var reconnectEnabled = false
+    private val reconnectRunnable = Runnable { attemptReconnect() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,7 +79,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (message.has("connection_error")) {
                     controller?.stop()
-                    show("Connection lost: ${message.optString("connection_error")}. Scanner stopped; reconnect manually after checking Deriv positions.")
+                    show("Connection lost: ${message.optString("connection_error")}. Scanner stopped; attempting safe reconnection. You must restart scanning manually.")
+                    scheduleReconnect()
                 }
             }
         }
@@ -164,6 +171,8 @@ class MainActivity : AppCompatActivity() {
         button("CHECK SELECTED MARKET MULTIPLIERS") { checkMarket() }
         button("START AUTOMATIC DEMO SCALPING") { startTrading() }
         button("EMERGENCY STOP / DISCONNECT") {
+            reconnectEnabled = false
+            mainHandler.removeCallbacks(reconnectRunnable)
             controller?.stop()
             api.disconnect()
             show("Stopped. No new entries will be sent. Check Deriv for any still-open position.")
@@ -231,11 +240,15 @@ class MainActivity : AppCompatActivity() {
             show("Enter PAT, App ID and Demo account ID.")
             return
         }
-        prefs.edit().putString("pat", token).putString("appId", id).apply()
+        reconnectEnabled = true
+        reconnectAttempts = 0
+        prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).apply()
         show("Requesting Deriv Demo connection…")
         api.connect(token, id, accountId, "demo") { result ->
             runOnUiThread {
                 result.onSuccess {
+                    reconnectAttempts = 0
+                    mainHandler.removeCallbacks(reconnectRunnable)
                     show(it)
                     balanceView.text = "CONNECTED TO DEMO ACCOUNT: $accountId"
                     api.balance { balanceResult ->
@@ -251,6 +264,50 @@ class MainActivity : AppCompatActivity() {
                     }
                     show("Authenticated Demo WebSocket connected. Load markets.")
                 }.onFailure { show("Connection failed: ${it.message}") }
+            }
+        }
+    }
+
+
+    private fun scheduleReconnect() {
+        if (!reconnectEnabled || reconnectAttempts >= 5) {
+            if (reconnectAttempts >= 5) show("Automatic reconnect stopped after 5 attempts. Tap CONNECT DEMO ACCOUNT to retry.")
+            return
+        }
+        val delay = minOf(30_000L, 1_000L shl reconnectAttempts)
+        reconnectAttempts++
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.postDelayed(reconnectRunnable, delay)
+    }
+
+    private fun attemptReconnect() {
+        if (!reconnectEnabled || isFinishing) return
+        val token = prefs.getString("pat", "").orEmpty()
+        val app = prefs.getString("appId", "").orEmpty()
+        val accountId = prefs.getString("accountId", "").orEmpty()
+        if (token.isBlank() || app.isBlank() || accountId.isBlank()) {
+            show("Reconnect needs saved Demo credentials. Connect manually.")
+            return
+        }
+        show("Reconnecting to Deriv Demo (attempt ${reconnectAttempts}/5)…")
+        api.connect(token, app, accountId, "demo") { result ->
+            runOnUiThread {
+                result.onSuccess {
+                    reconnectAttempts = 0
+                    show("Deriv Demo reconnected. Checking account balance and open positions before restarting.")
+                    api.balance { }
+                    api.portfolio { portfolio ->
+                        runOnUiThread {
+                            portfolio.onSuccess { response ->
+                                val count = response.optJSONObject("portfolio")?.optJSONArray("contracts")?.length() ?: 0
+                                show("Reconnected. Existing open positions: $count. Scanner remains stopped; review positions, then start manually.")
+                            }.onFailure { show("Reconnected, but portfolio check failed. Scanner remains stopped.") }
+                        }
+                    }
+                }.onFailure {
+                    show("Reconnect failed: ${it.message}")
+                    scheduleReconnect()
+                }
             }
         }
     }
@@ -442,6 +499,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        reconnectEnabled = false
+        mainHandler.removeCallbacks(reconnectRunnable)
         super.onStop()
         controller?.stop()
         api.disconnect()
