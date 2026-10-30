@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
                 val code = markets[which].second
                 if (isChecked) {
                     if (selectedMarkets.size >= 20) {
-                        dialog.listView?.setItemChecked(which, false)
+                        (dialog as? android.app.AlertDialog)?.listView?.setItemChecked(which, false)
                         show("Maximum 20 markets.")
                     } else selectedMarkets.add(code)
                 } else selectedMarkets.remove(code)
