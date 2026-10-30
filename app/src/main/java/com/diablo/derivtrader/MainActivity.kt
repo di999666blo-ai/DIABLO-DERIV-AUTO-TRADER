@@ -479,6 +479,7 @@ class MainActivity : AppCompatActivity() {
             .put("symbol", record.symbol)
             .put("direction", record.direction)
             .put("buyPrice", record.buyPrice)
+            .put("exitPrice", record.exitPrice)
             .put("profit", record.profit)
             .put("status", record.status)
             .put("detail", record.detail)
@@ -493,7 +494,7 @@ class MainActivity : AppCompatActivity() {
         val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
         val lines = (maxOf(0, all.length() - 15) until all.length()).map { i ->
             val item = all.optJSONObject(i) ?: JSONObject()
-            "#${item.optLong("id")} ${item.optString("symbol")} ${item.optString("direction")} | ${item.optString("status")} | P/L ${item.optDouble("profit")}"
+            "#${item.optLong("id")} ${item.optString("symbol")} ${item.optString("direction")} | ${item.optString("status")} | Entry ${item.optDouble("buyPrice")} | Exit ${item.optDouble("exitPrice")} | P/L ${item.optDouble("profit")}"
         }
         historyView.text = lines.reversed().joinToString("\n").ifBlank { "No trades recorded yet." }
     }
