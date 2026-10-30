@@ -51,6 +51,14 @@ class MainActivity : AppCompatActivity() {
         render()
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
+        stake.setText(prefs.getString("stake", "1.00"))
+        multiplier.setText(prefs.getString("multiplier", "10"))
+        takeProfit.setText(prefs.getString("takeProfit", "2.00"))
+        stopLoss.setText(prefs.getString("stopLoss", "1.00"))
+        dailyLoss.setText(prefs.getString("dailyLoss", "5.00"))
+        maxLosses.setText(prefs.getString("maxLosses", "3"))
+        maxTrades.setText(prefs.getString("maxTrades", "20"))
+        cooldown.setText(prefs.getString("cooldown", "30"))
         showHistory()
         api.onUpdate = { message ->
             runOnUiThread {
@@ -63,7 +71,10 @@ class MainActivity : AppCompatActivity() {
                 message.optJSONObject("proposal_open_contract")?.let {
                     show("Contract ${it.optLong("contract_id")} | ${it.optString("status")} | P/L ${it.optDouble("profit")}")
                 }
-                if (message.has("connection_error")) show("Connection error: ${message.optString("connection_error")}")
+                if (message.has("connection_error")) {
+                    controller?.stop()
+                    show("Connection lost: ${message.optString("connection_error")}. Scanner stopped; reconnect manually after checking Deriv positions.")
+                }
             }
         }
     }
@@ -328,6 +339,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!api.connected) { show("Connect Deriv Demo first."); return }
+        prefs.edit()
+            .putString("stake", stake.text.toString())
+            .putString("multiplier", multiplier.text.toString())
+            .putString("takeProfit", takeProfit.text.toString())
+            .putString("stopLoss", stopLoss.text.toString())
+            .putString("dailyLoss", dailyLoss.text.toString())
+            .putString("maxLosses", maxLosses.text.toString())
+            .putString("maxTrades", maxTrades.text.toString())
+            .putString("cooldown", cooldown.text.toString())
+            .apply()
         val dailyStats = calculateTodayRiskStats()
         val config = TraderConfig(
             candleSeconds = 5L,
