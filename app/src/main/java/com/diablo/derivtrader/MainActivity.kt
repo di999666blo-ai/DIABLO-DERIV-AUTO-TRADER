@@ -174,8 +174,12 @@ class MainActivity : AppCompatActivity() {
             reconnectEnabled = false
             mainHandler.removeCallbacks(reconnectRunnable)
             controller?.stop()
-            api.disconnect()
-            show("Stopped. No new entries will be sent. Check Deriv for any still-open position.")
+            if (controller?.hasOpenPosition() == true) {
+                show("New entries stopped. Existing Demo position remains connected and monitored for its exit rules. Keep the app open until it closes.")
+            } else {
+                api.disconnect()
+                show("Stopped and disconnected. No open position was being monitored.")
+            }
         }
         log = TextView(this).apply {
             text = "DEMO ONLY — connect, load markets and select a symbol."
