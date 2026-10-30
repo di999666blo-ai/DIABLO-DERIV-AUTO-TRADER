@@ -226,7 +226,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestRealUnlock() {
         if (realUnlocked) { show("Real mode is already unlocked on this installation."); return }
-        val demoTradeVerified = prefs.getBoolean("demo_closed_trade_verified", false)
+        val demoTradeVerified = prefs.getBoolean("demo_closed_trade_verified", false) &&
+            prefs.getString("demo_verified_account_id", "") == prefs.getString("accountId", "") &&
+            prefs.getString("accountMode", "demo") == "demo"
         if (!demoTradeVerified) {
             show("Real remains locked: first complete at least one genuine Demo MULTUP/MULTDOWN trade and let Deriv report it CLOSED in the app history.")
             return
@@ -556,7 +558,10 @@ class MainActivity : AppCompatActivity() {
     private fun saveTrade(record: TradeRecord) {
         if (record.status == "CLOSED" && api.connectedMode == "demo" &&
             (record.direction == "UP" || record.direction == "DOWN")) {
-            prefs.edit().putBoolean("demo_closed_trade_verified", true).apply()
+            prefs.edit()
+                .putBoolean("demo_closed_trade_verified", true)
+                .putString("demo_verified_account_id", prefs.getString("accountId", "").orEmpty())
+                .apply()
         }
         val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
         all.put(JSONObject()
