@@ -114,6 +114,10 @@ class TradingController(
     }
 
     fun onDerivMessage(message: JSONObject) {
+        message.optJSONObject("proposal_open_contract")?.let {
+            onContractUpdate(it)
+            return
+        }
         if (!running.get()) return
         val tick = message.optJSONObject("tick") ?: return
         val quote = tick.optDouble("quote", Double.NaN)
