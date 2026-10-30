@@ -31,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var historyView: TextView
     private var controller: TradingController? = null
     private val markets = mutableListOf<Pair<String, String>>()
+    private val selectedMarkets = linkedSetOf<String>()
     private var accountCurrency = "USD"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -130,6 +131,7 @@ class MainActivity : AppCompatActivity() {
         marketSpinner = Spinner(this)
         marketSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load markets first"))
         box.addView(marketSpinner)
+        button("SELECT UP TO 20 MARKETS FOR SCANNING") { showMarketPicker() }
 
         label("STAKE (ACCOUNT CURRENCY)")
         stake = field("1.00", "1.00"); box.addView(stake)
@@ -268,6 +270,33 @@ class MainActivity : AppCompatActivity() {
         return markets.getOrNull(index)?.second
     }
 
+
+    private fun showMarketPicker() {
+        if (markets.isEmpty()) {
+            show("Load markets first.")
+            return
+        }
+        val labels = markets.map { "${it.first} (${it.second})" }.toTypedArray()
+        val checked = BooleanArray(markets.size) { markets[it].second in selectedMarkets }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Choose up to 20 markets")
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                val code = markets[which].second
+                if (isChecked) {
+                    if (selectedMarkets.size >= 20) {
+                        (it as? android.app.AlertDialog)?.listView?.setItemChecked(which, false)
+                        show("Maximum 20 markets.")
+                    } else selectedMarkets.add(code)
+                } else selectedMarkets.remove(code)
+            }
+            .setPositiveButton("SAVE") { _, _ ->
+                if (selectedMarkets.isEmpty()) show("No markets selected. Choose at least one.")
+                else show("Selected ${selectedMarkets.size} market(s): ${selectedMarkets.joinToString()}")
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
     private fun checkMarket() {
         val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
         api.contractsFor(selected) { result ->
@@ -284,7 +313,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTrading() {
-        val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
+        val selected = (selectedMarkets.toList().ifEmpty { listOfNotNull(selectedSymbol()) }).distinct()
+        if (selected.isEmpty()) { show("Load and select at least one market first."); return }
         val stakeValue = stake.text.toString().toDoubleOrNull() ?: 0.0
         val multiplierValue = multiplier.text.toString().toIntOrNull() ?: 0
         val tp = takeProfit.text.toString().toDoubleOrNull() ?: 0.0
