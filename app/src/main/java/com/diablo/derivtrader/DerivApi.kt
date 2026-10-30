@@ -97,8 +97,29 @@ class DerivApi {
         }
     }
 
-    fun authorize(token: String, done: (Result<JSONObject>) -> Unit) =
-        request(JSONObject().put("authorize", token), done)
+
+    fun getAccounts(token: String, appId: String, done: (Result<JSONObject>) -> Unit) {
+        val request = Request.Builder()
+            .url("https://api.derivws.com/trading/v1/options/accounts")
+            .get()
+            .header("Authorization", "Bearer $token")
+            .header("Deriv-App-ID", appId)
+            .build()
+        http.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) = done(Result.failure(e))
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val raw = it.body?.string().orEmpty()
+                    if (!it.isSuccessful) {
+                        done(Result.failure(Exception("Deriv accounts HTTP ${it.code}: $raw")))
+                    } else {
+                        try { done(Result.success(JSONObject(raw))) }
+                        catch (e: Exception) { done(Result.failure(e)) }
+                    }
+                }
+            }
+        })
+    }
 
     fun balance(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("balance", 1).put("subscribe", 1), done)
