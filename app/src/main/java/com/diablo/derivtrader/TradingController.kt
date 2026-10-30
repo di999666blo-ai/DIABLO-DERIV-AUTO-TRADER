@@ -2,6 +2,9 @@ package com.diablo.derivtrader
 
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 data class TraderConfig(
     val candleSeconds: Long = 5L,
@@ -62,6 +65,8 @@ class TradingController(
     private var openContractSymbol = ""
     private var closeRequestSent = false
     private var emergencyStop = false
+    private var watchdog: ScheduledExecutorService? = null
+    private val staleMarkets = hashSetOf<String>()
 
     @Synchronized
     fun start(selectedSymbol: String, accountCurrency: String = config.currency) =
@@ -95,7 +100,25 @@ class TradingController(
         }
         currency = accountCurrency
         emergencyStop = false
+        staleMarkets.clear()
         running.set(true)
+        watchdog?.shutdownNow()
+        watchdog = Executors.newSingleThreadScheduledExecutor { runnable ->
+            Thread(runnable, "diablo-feed-watchdog").apply { isDaemon = true }
+        }.also { scheduler ->
+            scheduler.scheduleAtFixedRate({
+                synchronized(this) {
+                    if (!running.get()) return@scheduleAtFixedRate
+                    val now = System.currentTimeMillis() / 1000L
+                    activeSymbols.forEach { market ->
+                        val builder = builders[market] ?: return@forEach
+                        if (builder.isStale(now, 15L) && staleMarkets.add(market)) {
+                            onStatus("$market feed stale (>15s). No entries will be taken from that market until ticks resume.")
+                        }
+                    }
+                }
+            }, 15L, 5L, TimeUnit.SECONDS)
+        }
         onStatus("Checking multiplier contracts on ${requested.size} selected market(s)…")
         checkNextMarket(requested, 0)
     }
@@ -150,10 +173,12 @@ class TradingController(
         val tick = message.optJSONObject("tick") ?: return
         val symbol = tick.optString("symbol")
         if (symbol !in activeSymbols) return
+        synchronized(this) { staleMarkets.remove(symbol) }
         val quote = tick.optDouble("quote", Double.NaN)
         val epoch = tick.optLong("epoch", 0L)
         val completed = builders[symbol]?.onTick(MarketTick(epoch, quote)) ?: return
         synchronized(this) {
+            if (symbol in staleMarkets) return
             val candles = candleHistory[symbol] ?: return
             candles.add(completed)
             if (candles.size > 300) candles.removeAt(0)
@@ -244,9 +269,8 @@ class TradingController(
                 onTrade(TradeRecord(id, openContractSymbol, contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
                 onStatus("Contract $id closed. P/L $profit | Session P/L $realizedPnl")
                 if (realizedPnl <= -config.dailyLossLimit || consecutiveLosses >= config.maxConsecutiveLosses || tradesToday >= config.maxTradesPerDay) {
-                    emergencyStop = true
-                    running.set(false)
                     onStatus("Risk lock activated. Scanner stopped.")
+                    stop()
                 }
             }
         }
@@ -256,6 +280,8 @@ class TradingController(
     fun stop() {
         running.set(false)
         emergencyStop = true
+        watchdog?.shutdownNow()
+        watchdog = null
         subscriptions.values.toList().forEach { id -> api.unsubscribe(id) { } }
         subscriptions.clear()
         onStatus("Scanner stopped. No new entries will be opened.")
