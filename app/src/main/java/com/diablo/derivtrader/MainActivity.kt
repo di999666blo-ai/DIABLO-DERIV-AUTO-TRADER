@@ -79,7 +79,7 @@ class MainActivity : AppCompatActivity() {
                 message.optJSONObject("balance")?.let {
                     val amount = it.optDouble("balance", Double.NaN)
                     accountCurrency = it.optString("currency", accountCurrency)
-                    if (amount.isFinite()) balanceView.text = "DEMO BALANCE: $amount $accountCurrency"
+                    if (amount.isFinite()) balanceView.text = "${api.connectedMode?.uppercase() ?: "ACCOUNT"} BALANCE: $amount $accountCurrency"
                 }
                 message.optJSONObject("proposal_open_contract")?.let {
                     show("Contract ${it.optLong("contract_id")} | ${it.optString("status")} | P/L ${it.optDouble("profit")}")
@@ -188,20 +188,20 @@ class MainActivity : AppCompatActivity() {
         cooldown = field("30", "30"); box.addView(cooldown)
 
         button("CHECK SELECTED MARKET MULTIPLIERS") { checkMarket() }
-        button("START AUTOMATIC DEMO SCALPING") { startTrading() }
+        button("START AUTOMATIC SCALPING — SELECTED MODE") { startTrading() }
         button("EMERGENCY STOP / DISCONNECT") {
             reconnectEnabled = false
             mainHandler.removeCallbacks(reconnectRunnable)
             controller?.stop()
             if (controller?.hasOpenPosition() == true) {
-                show("New entries stopped. Existing Demo position remains connected and monitored for its exit rules. Keep the app open until it closes.")
+                show("New entries stopped. Existing ${selectedMode.uppercase()} position remains connected and monitored for its exit rules. Keep the app open until it closes.")
             } else {
                 api.disconnect()
                 show("Stopped and disconnected. No open position was being monitored.")
             }
         }
         log = TextView(this).apply {
-            text = "DEMO ONLY — connect, load markets and select a symbol."
+            text = "Connect a Deriv account, load markets and select a symbol. Real trading requires verified Demo evidence and explicit approval."
             textSize = 14f
             setTextColor(0xFF00FF7A.toInt())
             setPadding(8, 18, 8, 18)
@@ -215,7 +215,7 @@ class MainActivity : AppCompatActivity() {
         historyView = TextView(this).apply { setTextColor(-1); textSize = 12f }
         box.addView(historyView)
         box.addView(TextView(this).apply {
-            text = "Real trading is locked. Multiplier contracts can lose the full stake. Run and verify Demo tests before considering real funds."
+            text = "Real mode requires a closed Demo trade, passing local risk self-tests and explicit approval. Multiplier contracts can lose the full stake."
             setTextColor(0xFFFF9AA5.toInt())
             setPadding(0, 16, 0, 10)
         })
