@@ -67,6 +67,7 @@ class TradingController(
     private var realizedPnl = config.initialRealizedPnl
     private var consecutiveLosses = config.initialConsecutiveLosses
     private var tradesToday = config.initialTradesToday
+    private var entryPending = false
     private var openContractId: Long? = null
     private var openContractSymbol = ""
     private var openContractSubscriptionId: String? = null
@@ -193,7 +194,7 @@ class TradingController(
             val signal = engine.evaluate(candles.toList())
             onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | ${signal.reason}")
             if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
-            if (openContractId != null) return
+            if (openContractId != null || entryPending) return
             val snapshot = RiskSnapshot(
                 realizedPnlToday = realizedPnl,
                 consecutiveLosses = consecutiveLosses,
@@ -213,7 +214,8 @@ class TradingController(
 
     @Synchronized
     private fun requestEntry(symbol: String, signal: TradeSignal) {
-        if (!running.get() || openContractId != null || emergencyStop) return
+        if (!running.get() || openContractId != null || entryPending || emergencyStop) return
+        entryPending = true
         onStatus("Requesting ${signal.direction} multiplier proposal on $symbol…")
         api.multiplierProposal(symbol, signal.direction.name, config.stake, config.multiplier, currency, config.takeProfit, config.stopLoss) { result ->
             result.onSuccess proposalResponse@ { response ->
@@ -221,6 +223,7 @@ class TradingController(
                 val proposalId = proposal?.optString("id").orEmpty()
                 val askPrice = proposal?.optDouble("ask_price", Double.NaN) ?: Double.NaN
                 if (proposalId.isBlank() || !askPrice.isFinite() || askPrice <= 0.0) {
+                    synchronized(this) { entryPending = false }
                     onStatus("$symbol proposal missing a valid ID/ask price; no purchase made.")
                     return@proposalResponse
                 }
@@ -229,10 +232,12 @@ class TradingController(
                         val buy = bought.optJSONObject("buy")
                         val id = buy?.optLong("contract_id", 0L) ?: 0L
                         if (id <= 0L) {
+                            synchronized(this) { entryPending = false }
                             onStatus("Buy response did not contain a valid contract ID.")
                             return@buyResponse
                         }
                         synchronized(this) {
+                            entryPending = false
                             openContractId = id
                             openContractSymbol = symbol
                             closeRequestSent = false
@@ -250,9 +255,9 @@ class TradingController(
                                 stop()
                             }
                         }
-                    }.onFailure { onStatus("Buy rejected: ${it.message}") }
+                    }.onFailure { synchronized(this) { entryPending = false }; onStatus("Buy rejected: ${it.message}") }
                 }
-            }.onFailure { onStatus("Proposal rejected: ${it.message}") }
+            }.onFailure { synchronized(this) { entryPending = false }; onStatus("Proposal rejected: ${it.message}") }
         }
     }
 
