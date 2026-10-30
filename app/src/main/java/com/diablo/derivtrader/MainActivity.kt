@@ -6,45 +6,57 @@ import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private val api = DerivApi()
-    private lateinit var log: TextView
+    private lateinit var prefs: android.content.SharedPreferences
     private lateinit var pat: EditText
     private lateinit var appId: EditText
     private lateinit var account: EditText
-    private lateinit var symbol: EditText
-    private lateinit var prefs: android.content.SharedPreferences
+    private lateinit var marketSpinner: Spinner
+    private lateinit var stake: EditText
+    private lateinit var multiplier: EditText
+    private lateinit var takeProfit: EditText
+    private lateinit var stopLoss: EditText
+    private lateinit var log: TextView
+    private lateinit var balanceView: TextView
+    private lateinit var historyView: TextView
+    private var controller: TradingController? = null
+    private val markets = mutableListOf<Pair<String, String>>()
+    private var accountCurrency = "USD"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = try {
-            val key = MasterKey.Builder(this)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
+            val key = MasterKey.Builder(this).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
             EncryptedSharedPreferences.create(
-                this,
-                "diablo_secure",
-                key,
+                this, "diablo_secure", key,
                 EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
-        } catch (e: Exception) {
-            Toast.makeText(this, "Secure credential storage unavailable. Credentials were not saved.", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Secure storage unavailable. Credentials were not saved.", Toast.LENGTH_LONG).show()
             finish()
             return
         }
         render()
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
+        showHistory()
         api.onUpdate = { message ->
             runOnUiThread {
-                val contract = message.optJSONObject("proposal_open_contract")
-                if (contract != null) {
-                    show("Contract ${contract.optLong("contract_id")} | ${contract.optString("status")} | P/L ${contract.optDouble("profit")}")
-                } else if (message.has("connection_error")) {
-                    show("Connection error: ${message.optString("connection_error")}")
+                controller?.onDerivMessage(message)
+                message.optJSONObject("balance")?.let {
+                    val amount = it.optDouble("balance", Double.NaN)
+                    accountCurrency = it.optString("currency", accountCurrency)
+                    if (amount.isFinite()) balanceView.text = "DEMO BALANCE: $amount $accountCurrency"
                 }
+                message.optJSONObject("proposal_open_contract")?.let {
+                    show("Contract ${it.optLong("contract_id")} | ${it.optString("status")} | P/L ${it.optDouble("profit")}")
+                }
+                if (message.has("connection_error")) show("Connection error: ${message.optString("connection_error")}")
             }
         }
     }
@@ -53,87 +65,87 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this)
         val box = LinearLayout(this).apply {
             orientation = 1
-            setPadding(24, 22, 24, 22)
+            setPadding(22, 18, 22, 24)
             setBackgroundColor(0xFF02040A.toInt())
         }
-        fun field(hintText: String, secret: Boolean = false) = EditText(this).apply {
-            hint = hintText
-            setTextColor(-1)
-            setHintTextColor(0xFF8090AA.toInt())
-            setSingleLine(true)
-            if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        fun label(text: String) {
+            box.addView(TextView(this).apply {
+                this.text = text
+                textSize = 12f
+                setTextColor(0xFF9EB0CA.toInt())
+                setPadding(0, 12, 0, 2)
+            })
         }
-        fun button(label: String, action: () -> Unit) = Button(this).apply {
-            text = label
-            setOnClickListener { action() }
+        fun field(hintText: String, default: String = "", secret: Boolean = false) =
+            EditText(this).apply {
+                hint = hintText
+                setText(default)
+                setTextColor(-1)
+                setHintTextColor(0xFF8090AA.toInt())
+                setSingleLine(true)
+                if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            }
+        fun button(title: String, action: () -> Unit) {
+            box.addView(Button(this).apply { text = title; setOnClickListener { action() } })
         }
 
         box.addView(TextView(this).apply {
-            text = "DIABLO DERIV TRADER"
-            textSize = 24f
+            text = "DIABLO DERIV AUTO TRADER"
+            textSize = 23f
             gravity = Gravity.CENTER
             setTextColor(0xFFFF0A1F.toInt())
+            setPadding(0, 8, 0, 16)
         })
-        pat = field("Deriv PAT with trade permission", true)
-        appId = field("Deriv App ID")
-        account = field("Deriv Options account ID")
-        symbol = field("Market symbol e.g. 1HZ100V")
-        listOf("PERSONAL ACCESS TOKEN", "APP ID", "DEMO ACCOUNT ID", "MARKET SYMBOL")
-            .forEachIndexed { index, label ->
-                box.addView(TextView(this).apply {
-                    text = label
-                    setTextColor(0xFF9EB0CA.toInt())
-                })
-                box.addView(listOf(pat, appId, account, symbol)[index])
-            }
+        label("DERIV PERSONAL ACCESS TOKEN")
+        pat = field("PAT with trade permission", secret = true); box.addView(pat)
+        label("DERIV APP ID")
+        appId = field("App ID"); box.addView(appId)
+        label("DERIV DEMO OPTIONS ACCOUNT ID")
+        account = field("Demo account ID"); box.addView(account)
+        balanceView = TextView(this).apply { text = "DEMO BALANCE: not connected"; setTextColor(0xFF00FF7A.toInt()) }
+        box.addView(balanceView)
+        button("CONNECT DEMO ACCOUNT") { connect() }
+        button("LOAD MARKETS") { loadMarkets() }
+        label("SELECT MARKET")
+        marketSpinner = Spinner(this)
+        marketSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load markets first"))
+        box.addView(marketSpinner)
 
-        box.addView(button("CONNECT DERIV DEMO") { connect() })
-        box.addView(button("LOAD MARKETS") {
-            api.markets { result ->
-                runOnUiThread {
-                    result.onSuccess { show("Markets response received: ${it.optJSONArray("active_symbols")?.length() ?: 0} symbols") }
-                        .onFailure { show(it.message ?: "Market error") }
-                }
-            }
-        })
-        box.addView(button("CHECK MULTIPLIER AVAILABILITY") {
-            val selectedSymbol = symbol.text.toString().trim()
-            if (selectedSymbol.isBlank()) {
-                show("Enter a market symbol first.")
-            } else {
-                api.contractsFor(selectedSymbol) { result ->
-                    runOnUiThread {
-                        result.onSuccess { response ->
-                            val available = response.optJSONObject("contracts_for")
-                                ?.optJSONArray("available")
-                            val types = mutableListOf<String>()
-                            if (available != null) {
-                                for (i in 0 until available.length()) {
-                                    val item = available.optJSONObject(i) ?: continue
-                                    val type = item.optString("contract_type")
-                                    if (type == "MULTUP" || type == "MULTDOWN") types.add(type)
-                                }
-                            }
-                            show("Multiplier contracts for $selectedSymbol: ${types.distinct().joinToString().ifBlank { "none confirmed" }}")
-                        }.onFailure { show(it.message ?: "Contract check error") }
-                    }
-                }
-            }
-        })
-        box.addView(button("STOP / DISCONNECT") {
+        label("STAKE (ACCOUNT CURRENCY)")
+        stake = field("1.00", "1.00"); box.addView(stake)
+        label("MULTIPLIER")
+        multiplier = field("10", "10"); box.addView(multiplier)
+        label("TAKE PROFIT (ACCOUNT CURRENCY)")
+        takeProfit = field("2.00", "2.00"); box.addView(takeProfit)
+        label("STOP LOSS (ACCOUNT CURRENCY)")
+        stopLoss = field("1.00", "1.00"); box.addView(stopLoss)
+
+        button("CHECK SELECTED MARKET MULTIPLIERS") { checkMarket() }
+        button("START AUTOMATIC DEMO SCALPING") { startTrading() }
+        button("EMERGENCY STOP / DISCONNECT") {
+            controller?.stop()
             api.disconnect()
-            show("Disconnected. No new trades will be started. Existing contracts remain on Deriv.")
-        })
+            show("Stopped. No new entries will be sent. Check Deriv for any still-open position.")
+        }
         log = TextView(this).apply {
-            text = "DEMO ONLY — automated trading is not enabled yet."
+            text = "DEMO ONLY — connect, load markets and select a symbol."
             textSize = 14f
             setTextColor(0xFF00FF7A.toInt())
-            setPadding(12, 20, 12, 20)
+            setPadding(8, 18, 8, 18)
         }
         box.addView(log)
         box.addView(TextView(this).apply {
-            text = "Multipliers can lose money. Real mode remains locked until Demo strategy, risk controls and trade lifecycle are tested."
+            text = "TRADE HISTORY"
+            textSize = 18f
+            setTextColor(0xFFFF0A1F.toInt())
+        })
+        historyView = TextView(this).apply { setTextColor(-1); textSize = 12f }
+        box.addView(historyView)
+        box.addView(TextView(this).apply {
+            text = "Real trading is locked. Multiplier contracts can lose the full stake. Run and verify Demo tests before considering real funds."
             setTextColor(0xFFFF9AA5.toInt())
+            setPadding(0, 16, 0, 10)
         })
         scroll.addView(box)
         setContentView(scroll)
@@ -141,20 +153,126 @@ class MainActivity : AppCompatActivity() {
 
     private fun connect() {
         val token = pat.text.toString().trim()
-        val applicationId = appId.text.toString().trim()
+        val id = appId.text.toString().trim()
         val accountId = account.text.toString().trim()
-        if (token.isBlank() || applicationId.isBlank() || accountId.isBlank()) {
-            show("Enter PAT, App ID and account ID.")
+        if (token.isBlank() || id.isBlank() || accountId.isBlank()) {
+            show("Enter PAT, App ID and Demo account ID.")
             return
         }
-        prefs.edit().putString("pat", token).putString("appId", applicationId).apply()
-        show("Connecting to Deriv Demo…")
-        api.connect(token, applicationId, accountId, "demo") { result ->
+        prefs.edit().putString("pat", token).putString("appId", id).apply()
+        show("Requesting Deriv Demo connection…")
+        api.connect(token, id, accountId, "demo") { result ->
             runOnUiThread {
-                result.onSuccess { show(it) }
-                    .onFailure { show("Connection failed: ${it.message}") }
+                result.onSuccess {
+                    show(it)
+                    api.authorize(token) { auth ->
+                        runOnUiThread {
+                            auth.onSuccess { response ->
+                                val a = response.optJSONObject("authorize")
+                                accountCurrency = a?.optString("currency", "USD") ?: "USD"
+                                balanceView.text = "CONNECTED: ${a?.optString("loginid", accountId)} | ${a?.optString("currency", accountCurrency)}"
+                                api.balance { }
+                                show("Demo authorization confirmed. Load markets.")
+                            }.onFailure { show("Authorization failed: ${it.message}") }
+                        }
+                    }
+                }.onFailure { show("Connection failed: ${it.message}") }
             }
         }
+    }
+
+    private fun loadMarkets() {
+        api.markets { result ->
+            runOnUiThread {
+                result.onSuccess { response ->
+                    val array = response.optJSONArray("active_symbols")
+                    markets.clear()
+                    if (array != null) for (i in 0 until array.length()) {
+                        val item = array.optJSONObject(i) ?: continue
+                        val symbolCode = item.optString("symbol")
+                        val display = item.optString("display_name", symbolCode)
+                        if (symbolCode.isNotBlank()) markets.add(display to symbolCode)
+                    }
+                    val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                        markets.map { "${it.first} (${it.second})" })
+                    marketSpinner.adapter = adapter
+                    show("Loaded ${markets.size} active markets. Multiplier support is checked separately per symbol.")
+                }.onFailure { show("Market load failed: ${it.message}") }
+            }
+        }
+    }
+
+    private fun selectedSymbol(): String? {
+        val index = marketSpinner.selectedItemPosition
+        return markets.getOrNull(index)?.second
+    }
+
+    private fun checkMarket() {
+        val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
+        api.contractsFor(selected) { result ->
+            runOnUiThread {
+                result.onSuccess { response ->
+                    val available = response.optJSONObject("contracts_for")?.optJSONArray("available")
+                    val supported = (0 until (available?.length() ?: 0)).mapNotNull {
+                        available?.optJSONObject(it)?.optString("contract_type")
+                    }.filter { it == "MULTUP" || it == "MULTDOWN" }.distinct()
+                    show("$selected multiplier support: ${supported.joinToString().ifBlank { "not available" }}")
+                }.onFailure { show("Contract check failed: ${it.message}") }
+            }
+        }
+    }
+
+    private fun startTrading() {
+        val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
+        val stakeValue = stake.text.toString().toDoubleOrNull() ?: 0.0
+        val multiplierValue = multiplier.text.toString().toIntOrNull() ?: 0
+        val tp = takeProfit.text.toString().toDoubleOrNull() ?: 0.0
+        val sl = stopLoss.text.toString().toDoubleOrNull() ?: 0.0
+        if (stakeValue <= 0 || multiplierValue <= 0 || tp <= 0 || sl <= 0) {
+            show("Stake, multiplier, take profit and stop loss must all be greater than zero.")
+            return
+        }
+        if (!api.connected) { show("Connect Deriv Demo first."); return }
+        val config = TraderConfig(
+            candleSeconds = 5L,
+            stake = stakeValue,
+            multiplier = multiplierValue,
+            currency = accountCurrency,
+            takeProfit = tp,
+            stopLoss = sl
+        )
+        controller = TradingController(api, config, { status ->
+            runOnUiThread { show(status) }
+        }, { record ->
+            runOnUiThread { saveTrade(record) }
+        })
+        controller?.start(selected, accountCurrency)
+    }
+
+    private fun saveTrade(record: TradeRecord) {
+        val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
+        all.put(JSONObject()
+            .put("id", record.contractId)
+            .put("symbol", record.symbol)
+            .put("direction", record.direction)
+            .put("buyPrice", record.buyPrice)
+            .put("profit", record.profit)
+            .put("status", record.status)
+            .put("detail", record.detail)
+            .put("time", System.currentTimeMillis()))
+        while (all.length() > 200) all.remove(0)
+        prefs.edit().putString("trade_history", all.toString()).apply()
+        showHistory()
+    }
+
+    private fun showHistory() {
+        if (!::historyView.isInitialized) return
+        val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
+        val lines = (maxOf(0, all.length() - 15) until all.length()).map { i ->
+            val item = all.optJSONObject(i) ?: JSONObject()
+            "#${item.optLong("id")} ${item.optString("symbol")} ${item.optString("direction")} | ${item.optString("status")} | P/L ${item.optDouble("profit")}"
+        }
+        historyView.text = lines.reversed().joinToString("\n").ifBlank { "No trades recorded yet." }
     }
 
     private fun show(message: String) {
@@ -163,6 +281,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        controller?.stop()
         api.disconnect()
     }
 }
