@@ -39,7 +39,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
   if(!markets.every(x=>/^[A-Z0-9_]+$/i.test(x)))return json(res,400,{error:"Invalid market symbol"});
   if(autoRunner)return json(res,409,{error:"Autonomous scanner is already running"});
   const mode=config.mode;
-  await deriv.connect(accountId,mode);activeAccount=accountId;activeMode=mode;
+  await deriv.connect(accountId,mode);activeAccount=accountId;activeMode=mode;for(const id of Object.keys(ledger.state.open)){try{await deriv.watchContract(id);}catch(e){console.error("Could not restore contract monitor",id,e.message);}}
   guard.arm();await persistRisk();
   let stopped=false,busy=false;
   autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},reconnectFailures:0,stop:()=>{stopped=true;}};
