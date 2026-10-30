@@ -92,10 +92,10 @@ if(req.method==="POST"&&req.url==="/api/scan-and-execute"){
       await wait(1200);
     }catch(error){failed.push({symbol:order.symbol,sequence:order.sequence,reason:error.message});break;}
   }
-  if(failed.length)guard.emergencyStop();
+  if(failed.length){guard.emergencyStop();await persistRisk();}
   return json(res,200,{execution:"DEMO_ONLY",signals,planned:orders.length,placed,failed,remaining:orders.length-placed.length,risk:guard.snapshot(),note:"Orders are queued with pacing. Any failure halts the remaining batch. Settlement updates are monitored from Deriv."});
 }
-if(req.method==="POST"&&req.url==="/api/stop"){guard.emergencyStop();deriv.close();activeAccount=null;await persistRisk();return json(res,200,{stopped:true});}
+if(req.method==="POST"&&req.url==="/api/stop"){guard.emergencyStop();await persistRisk();return json(res,200,{stopped:true,connected:deriv.connected,note:"New orders stopped; existing contract settlement monitoring remains connected."});}
 if(req.method==="POST"&&req.url==="/api/arm-demo"){guard.arm();await persistRisk();return json(res,200,{armed:true,mode:"demo"});}
 if(req.method==="GET"){const pathname=req.url.split("?")[0];const name=pathname==="/"? "index.html":pathname.substring(1);if(name.includes(".."))return json(res,400,{error:"Invalid path"});try{const data=await readFile(resolve(root,name));res.writeHead(200,{"content-type":extname(name)===".html"?"text/html; charset=utf-8":"text/plain; charset=utf-8","x-content-type-options":"nosniff"});return res.end(data);}catch{return json(res,404,{error:"Not found"});}}
 return json(res,404,{error:"Not found"});
