@@ -6,6 +6,7 @@ import {config} from "./config.js";
 import {RiskGuard} from "./risk.js";
 import {analyzeCandles} from "./strategy.js";
 import {DerivClient} from "./deriv.js";
+import {createBatchPlan} from "./portfolio.js";
 const root=resolve(fileURLToPath(new URL("../public",import.meta.url)));
 const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,consecutiveLosses:config.maxConsecutiveLosses,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake});
 const deriv=new DerivClient({token:config.apiToken,appId:config.appId});let activeAccount=null;
@@ -19,6 +20,7 @@ if(req.method==="POST"&&req.url==="/api/disconnect"){deriv.close();activeAccount
 if(req.method==="GET"&&req.url==="/api/symbols"){const symbols=deriv.connected?await deriv.symbols():await deriv.publicSymbols();return json(res,200,{symbols});}
 if(req.method==="POST"&&req.url==="/api/history"){const b=await body(req);return json(res,200,{candles:await deriv.history(String(b.symbol||""),b.count,b.granularity)});}
 if(req.method==="POST"&&req.url==="/api/analyze"){const b=await body(req);return json(res,200,analyzeCandles(b.candles,b.options));}
+if(req.method==="POST"&&req.url==="/api/batch-plan"){const b=await body(req);const plan=createBatchPlan(b.markets,b.tradesPerMarket);return json(res,200,{...plan,execution:"NOT ENABLED",note:"Preview only. No orders are placed by this endpoint."});}
 if(req.method==="POST"&&req.url==="/api/proposal"){const b=await body(req);if(!deriv.connected||!activeAccount)return json(res,409,{error:"Connect a demo Options account first"});return json(res,200,{proposal:await deriv.proposal(b),approvalRequired:true});}
 if(req.method==="POST"&&req.url==="/api/buy"){const b=await body(req);if(!deriv.connected||!activeAccount)return json(res,409,{error:"Connect a demo Options account first"});if(b.confirm!==true)return json(res,400,{error:"Explicit confirm=true is required"});const gate=guard.canTrade({stake:b.stake,autoTrade:true,mode:"demo"});if(!gate.ok)return json(res,403,{error:gate.reason});const result=await deriv.buy(String(b.proposalId||""),b.maxPrice);guard.recordTrade();return json(res,200,{bought:true,result,risk:guard.snapshot()});}
 if(req.method==="POST"&&req.url==="/api/stop"){guard.emergencyStop();deriv.close();activeAccount=null;return json(res,200,{stopped:true});}
