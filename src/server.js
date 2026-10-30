@@ -44,7 +44,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
   let stopped=false,busy=false;
   autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},reconnectFailures:0,stop:()=>{stopped=true;}};
   const runCycle=async()=>{
-    if(stopped||busy)return;if(!deriv.connected){setTimeout(runCycle,5000).unref?.();return;}
+    if(stopped||busy)return;if(!deriv.connected){try{autoRunner.reconnectFailures=(autoRunner.reconnectFailures||0)+1;if(autoRunner.reconnectFailures>5){guard.emergencyStop();stopped=true;await persistRisk();return;}await deriv.connect(accountId,mode);autoRunner.reconnectFailures=0;console.log("DIABLO reconnected to Deriv",mode);}catch(e){console.error("Deriv reconnect attempt failed:",e.message);setTimeout(runCycle,5000).unref?.();return;}}
     busy=true;
     try{
       const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
@@ -159,4 +159,4 @@ return json(res,404,{error:"Not found"});
 
 await ledger.load();
 if(ledger.state.risk)guard.restore(ledger.state.risk);
-server.listen(config.port,"127.0.0.1",()=>console.log("DIABLO demo service listening on http://127.0.0.1:"+config.port));
+server.listen(config.port,"127.0.0.1",()=>{console.log("DIABLO service listening on http://127.0.0.1:"+config.port);if(config.autoStart&&config.autoTrade&&config.autoAccountId&&config.autoMarkets.length){setTimeout(()=>fetch("http://127.0.0.1:"+config.port+"/api/automation/start",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({confirm:true})}).then(r=>r.json()).then(x=>console.log("DIABLO AUTO_START:",x)).catch(e=>console.error("DIABLO AUTO_START failed:",e.message)),2000).unref?.();}});
