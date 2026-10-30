@@ -57,7 +57,9 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
-        realUnlocked = prefs.getBoolean("real_unlocked", false)
+        realUnlocked = false // Real remains locked until an in-app Demo verification flow is implemented and passed.
+        prefs.edit().putBoolean("real_unlocked", false).apply()
+        selectedMode = "demo"
         render()
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
@@ -137,12 +139,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
         box.addView(modeSpinner)
-        button("REVIEW DEMO VERIFICATION & UNLOCK REAL") { requestRealUnlock() }
+        button("REAL MODE — LOCKED PENDING VERIFIED DEMO TESTS") { requestRealUnlock() }
         label("DERIV PERSONAL ACCESS TOKEN")
         pat = field("PAT with trade permission", secret = true); box.addView(pat)
         label("DERIV APP ID")
         appId = field("App ID"); box.addView(appId)
-        label("DERIV DEMO OPTIONS ACCOUNT")
+        label("DERIV OPTIONS ACCOUNT (DEMO OR REAL, MATCHING MODE)")
         account = field("Demo account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }; box.addView(account)
         button("LOAD MY DERIV ACCOUNTS") { loadAccounts() }
         accountSpinner = Spinner(this)
@@ -153,13 +155,13 @@ class MainActivity : AppCompatActivity() {
                 val item = demoAccounts.getOrNull(position) ?: return
                 account.setText(item.optString("account_id"))
                 accountCurrency = item.optString("currency", "USD")
-                balanceView.text = "SELECTED DEMO: ${item.optString("account_id")} | ${item.optString("balance")} ${accountCurrency}"
+                balanceView.text = "SELECTED ${accountModeOf(item).uppercase()}: ${item.optString("account_id")} | ${item.optString("balance")} ${accountCurrency}"
             }
         }
         box.addView(accountSpinner)
         balanceView = TextView(this).apply { text = "DEMO BALANCE: not connected"; setTextColor(0xFF00FF7A.toInt()) }
         box.addView(balanceView)
-        button("CONNECT DEMO ACCOUNT") { connect() }
+        button("CONNECT SELECTED ACCOUNT MODE") { connect() }
         button("LOAD MARKETS") { loadMarkets() }
         label("SELECT MARKET")
         marketSpinner = Spinner(this)
@@ -222,20 +224,27 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun requestRealUnlock() {
-        if (realUnlocked) { show("Real mode is already unlocked on this installation."); return }
-        val checks = arrayOf("I completed a successful Demo MULTUP or MULTDOWN buy and close.", "I confirmed the closed trade appears in Deriv and app history.", "I tested take-profit, stop-loss, daily-loss and emergency-stop behavior.", "I understand a multiplier trade can lose the full stake and Real mode uses real funds.")
-        val selected = BooleanArray(checks.size)
-        android.app.AlertDialog.Builder(this).setTitle("Demo verification and Real trading approval")
-            .setMultiChoiceItems(checks, selected) { _, which, checked -> selected[which] = checked }
-            .setPositiveButton("I EXPLICITLY APPROVE REAL MODE") { _, _ ->
-                if (!selected.all { it }) show("Unlock refused: complete every Demo verification and acknowledgement.")
-                else {
-                    realUnlocked = true
-                    prefs.edit().putBoolean("real_unlocked", true).apply()
-                    modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("DEMO", "REAL — UNLOCKED"))
-                    show("Real mode unlocked. Select a Real account to connect; trading does not start automatically.")
-                }
-            }.setNegativeButton("KEEP LOCKED", null).show()
+        realUnlocked = false
+        prefs.edit().putBoolean("real_unlocked", false).apply()
+        show("REAL MODE IS SAFETY-LOCKED. A checkbox cannot verify Demo execution or risk controls. Complete actual Demo trade and risk-control testing first; this build does not permit Real trading.")
+    }
+
+    private fun accountModeOf(item: JSONObject): String {
+        val declared = item.optString("account_type", item.optString("account_category", "")).lowercase()
+        if (declared.contains("demo") || declared.contains("virtual")) return "demo"
+        if (declared.contains("real") || declared.contains("financial")) return "real"
+        val accountId = item.optString("account_id").uppercase()
+        return when {
+            accountId.startsWith("VRTC") -> "demo"
+            accountId.startsWith("CR") -> "real"
+            else -> "unknown"
+        }
+    }
+
+    private fun accountModeOfId(accountId: String): String = when {
+        accountId.startsWith("VRTC", ignoreCase = true) -> "demo"
+        accountId.startsWith("CR", ignoreCase = true) -> "real"
+        else -> "unknown"
     }
 
     private fun loadAccounts() {
@@ -261,7 +270,7 @@ class MainActivity : AppCompatActivity() {
                         if (single != null && single.optString("account_id").isNotBlank()) demoAccounts.add(single)
                     }
                     accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-                        demoAccounts.map { "${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
+                        demoAccounts.map { "${accountModeOf(it)} | ${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
                     show("Found ${demoAccounts.size} account(s). Select the account matching your chosen mode.")
                 }.onFailure { show("Account discovery failed: ${it.message}") }
             }
@@ -273,10 +282,12 @@ class MainActivity : AppCompatActivity() {
         val id = appId.text.toString().trim()
         val accountId = account.text.toString().trim()
         if (token.isBlank() || id.isBlank() || accountId.isBlank()) {
-            show("Enter PAT, App ID and Demo account ID.")
+            show("Enter PAT, App ID and the account ID.")
             return
         }
-        if (selectedMode == "real" && !realUnlocked) { show("Real mode is locked until Demo verification and explicit approval."); return }
+        if (selectedMode == "real") { show("Real mode is safety-locked pending verified Demo testing."); return }
+        val detectedMode = accountModeOfId(accountId)
+        if (detectedMode != selectedMode) { show("Account/mode mismatch: this account ID is detected as $detectedMode, but ${selectedMode.uppercase()} is selected. Choose the correct account."); return }
         reconnectEnabled = true
         reconnectAttempts = 0
         prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).putString("accountMode", selectedMode).apply()
@@ -287,19 +298,19 @@ class MainActivity : AppCompatActivity() {
                     reconnectAttempts = 0
                     mainHandler.removeCallbacks(reconnectRunnable)
                     show(it)
-                    balanceView.text = "CONNECTED TO DEMO ACCOUNT: $accountId"
+                    balanceView.text = "CONNECTED TO ${selectedMode.uppercase()} ACCOUNT: $accountId"
                     api.balance { balanceResult ->
                         runOnUiThread {
                             balanceResult.onSuccess { response ->
                                 val b = response.optJSONObject("balance")
                                 if (b != null) {
                                     accountCurrency = b.optString("currency", accountCurrency)
-                                    balanceView.text = "DEMO BALANCE: ${b.optDouble("balance")} $accountCurrency"
+                                    balanceView.text = "${selectedMode.uppercase()} BALANCE: ${b.optDouble("balance")} $accountCurrency"
                                 }
                             }.onFailure { show("Balance request failed: ${it.message}") }
                         }
                     }
-                    show("Authenticated Demo WebSocket connected. Load markets.")
+                    show("Authenticated Deriv ${selectedMode.uppercase()} WebSocket connected. Load markets.")
                 }.onFailure { show("Connection failed: ${it.message}") }
             }
         }
@@ -308,7 +319,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun scheduleReconnect() {
         if (!reconnectEnabled || reconnectAttempts >= 5) {
-            if (reconnectAttempts >= 5) show("Automatic reconnect stopped after 5 attempts. Tap CONNECT DEMO ACCOUNT to retry.")
+            if (reconnectAttempts >= 5) show("Automatic reconnect stopped after 5 attempts. Tap CONNECT SELECTED ACCOUNT MODE to retry.")
             return
         }
         val delay = minOf(30_000L, 1_000L shl reconnectAttempts)
@@ -323,7 +334,12 @@ class MainActivity : AppCompatActivity() {
         val app = prefs.getString("appId", "").orEmpty()
         val accountId = prefs.getString("accountId", "").orEmpty()
         if (token.isBlank() || app.isBlank() || accountId.isBlank()) {
-            show("Reconnect needs saved Demo credentials. Connect manually.")
+            show("Reconnect needs saved Deriv credentials. Connect manually.")
+            return
+        }
+        val mode = prefs.getString("accountMode", "demo").orEmpty()
+        if (mode == "real" || accountModeOfId(accountId) != "demo") {
+            show("Automatic reconnect blocked: only a verified Demo account can reconnect in this build. Connect manually.")
             return
         }
         show("Reconnecting to Deriv Demo (attempt ${reconnectAttempts}/5)…")
@@ -433,7 +449,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!api.connected) { show("Connect the selected Deriv account first."); return }
-        if (selectedMode == "real" && !realUnlocked) { show("Real trading safety gate is locked."); return }
+        if (selectedMode != "demo" || accountModeOfId(prefs.getString("accountId", "").orEmpty()) != "demo") { show("Safety lock: this build permits automated trading only on a detected Demo account."); return }
         prefs.edit()
             .putString("stake", stake.text.toString())
             .putString("multiplier", multiplier.text.toString())
