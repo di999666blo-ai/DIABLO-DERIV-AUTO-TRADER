@@ -109,7 +109,7 @@ class MainActivity : AppCompatActivity() {
         label("DERIV APP ID")
         appId = field("App ID"); box.addView(appId)
         label("DERIV DEMO OPTIONS ACCOUNT")
-        account = field("Demo account ID"); box.addView(account)
+        account = field("Demo account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }; box.addView(account)
         button("LOAD MY DERIV ACCOUNTS") { loadAccounts() }
         accountSpinner = Spinner(this)
         accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
@@ -328,6 +328,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!api.connected) { show("Connect Deriv Demo first."); return }
+        val dailyStats = calculateTodayRiskStats()
         val config = TraderConfig(
             candleSeconds = 5L,
             stake = stakeValue,
@@ -338,7 +339,10 @@ class MainActivity : AppCompatActivity() {
             dailyLossLimit = dailyLossValue,
             maxConsecutiveLosses = lossLimit,
             maxTradesPerDay = tradesLimit,
-            cooldownMillis = cooldownSeconds * 1000L
+            cooldownMillis = cooldownSeconds * 1000L,
+            initialRealizedPnl = dailyStats.first,
+            initialConsecutiveLosses = dailyStats.second,
+            initialTradesToday = dailyStats.third
         )
         show("Checking Deriv for existing open positions before starting…")
         api.portfolio { portfolioResult ->
@@ -359,6 +363,31 @@ class MainActivity : AppCompatActivity() {
                 }.onFailure { show("Could not verify open positions. Scanner blocked for safety: ${it.message}") }
             }
         }
+    }
+
+
+    private fun calculateTodayRiskStats(): Triple<Double, Int, Int> {
+        val calendar = java.util.Calendar.getInstance()
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        calendar.set(java.util.Calendar.MINUTE, 0)
+        calendar.set(java.util.Calendar.SECOND, 0)
+        calendar.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = calendar.timeInMillis
+        val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
+        val closed = mutableListOf<Pair<Long, Double>>()
+        for (i in 0 until all.length()) {
+            val item = all.optJSONObject(i) ?: continue
+            if (item.optString("status") != "CLOSED") continue
+            val time = item.optLong("time", 0L)
+            if (time >= startOfDay) closed.add(time to item.optDouble("profit", 0.0))
+        }
+        closed.sortBy { it.first }
+        val pnl = closed.sumOf { it.second }
+        var losses = 0
+        for (item in closed.asReversed()) {
+            if (item.second < 0.0) losses++ else break
+        }
+        return Triple(pnl, losses, closed.size)
     }
 
     private fun saveTrade(record: TradeRecord) {
