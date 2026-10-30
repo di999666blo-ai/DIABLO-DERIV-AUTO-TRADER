@@ -57,8 +57,9 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
-        realUnlocked = false // Real remains locked until an in-app Demo verification flow is implemented and passed.
-        prefs.edit().putBoolean("real_unlocked", false).apply()
+        realUnlocked = prefs.getBoolean("real_unlocked", false) &&
+            prefs.getBoolean("demo_closed_trade_verified", false) && RiskManager.selfTest()
+        if (!realUnlocked) prefs.edit().putBoolean("real_unlocked", false).apply()
         selectedMode = "demo"
         render()
         pat.setText(prefs.getString("pat", ""))
@@ -139,13 +140,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
         box.addView(modeSpinner)
-        button("REAL MODE — LOCKED PENDING VERIFIED DEMO TESTS") { requestRealUnlock() }
+        button(if (realUnlocked) "REAL MODE — VERIFIED & UNLOCKED" else "VERIFY DEMO TESTS & UNLOCK REAL") { requestRealUnlock() }
         label("DERIV PERSONAL ACCESS TOKEN")
         pat = field("PAT with trade permission", secret = true); box.addView(pat)
         label("DERIV APP ID")
         appId = field("App ID"); box.addView(appId)
         label("DERIV OPTIONS ACCOUNT (DEMO OR REAL, MATCHING MODE)")
-        account = field("Demo account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }; box.addView(account)
+        account = field("Deriv Options account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }; box.addView(account)
         button("LOAD MY DERIV ACCOUNTS") { loadAccounts() }
         accountSpinner = Spinner(this)
         accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
@@ -224,9 +225,35 @@ class MainActivity : AppCompatActivity() {
 
 
     private fun requestRealUnlock() {
-        realUnlocked = false
-        prefs.edit().putBoolean("real_unlocked", false).apply()
-        show("REAL MODE IS SAFETY-LOCKED. A checkbox cannot verify Demo execution or risk controls. Complete actual Demo trade and risk-control testing first; this build does not permit Real trading.")
+        if (realUnlocked) { show("Real mode is already unlocked on this installation."); return }
+        val demoTradeVerified = prefs.getBoolean("demo_closed_trade_verified", false)
+        if (!demoTradeVerified) {
+            show("Real remains locked: first complete at least one genuine Demo MULTUP/MULTDOWN trade and let Deriv report it CLOSED in the app history.")
+            return
+        }
+        if (!RiskManager.selfTest()) {
+            show("Real remains locked: one or more local risk-control self-tests failed.")
+            return
+        }
+        val checks = arrayOf("I checked that the closed Demo trade also appears in my Deriv account history.", "I understand multiplier trades can lose the full stake and Real mode uses real money.")
+        val selected = BooleanArray(checks.size)
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Final Real-mode approval")
+            .setMultiChoiceItems(checks, selected) { _, which, checked -> selected[which] = checked }
+            .setPositiveButton("UNLOCK REAL MODE") { _, _ ->
+                if (!selected.all { it }) {
+                    show("Real remains locked: confirm both requirements after checking your Demo results.")
+                } else {
+                    realUnlocked = true
+                    prefs.edit().putBoolean("real_unlocked", true).apply()
+                    modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("DEMO", "REAL — UNLOCKED"))
+                    modeSpinner.setSelection(0)
+                    selectedMode = "demo"
+                    show("Real mode unlocked after a recorded Demo close and passing risk self-tests. Select your Real account and connect manually; trading will not start automatically.")
+                }
+            }
+            .setNegativeButton("KEEP DEMO ONLY", null)
+            .show()
     }
 
     private fun accountModeOf(item: JSONObject): String {
@@ -285,12 +312,12 @@ class MainActivity : AppCompatActivity() {
             show("Enter PAT, App ID and the account ID.")
             return
         }
-        if (selectedMode == "real") { show("Real mode is safety-locked pending verified Demo testing."); return }
+        if (selectedMode == "real" && !realUnlocked) { show("Real mode is locked until verified Demo testing and explicit approval."); return }
         val accountRecord = demoAccounts.firstOrNull { it.optString("account_id") == accountId }
         val detectedMode = accountRecord?.let { accountModeOf(it) } ?: accountModeOfId(accountId)
         if (detectedMode == "unknown") { show("Account type could not be verified. Tap LOAD MY DERIV ACCOUNTS and select the account from the list."); return }
         if (detectedMode != selectedMode) { show("Account/mode mismatch: selected account is $detectedMode, but ${selectedMode.uppercase()} is selected. Choose the matching account."); return }
-        reconnectEnabled = true
+        reconnectEnabled = selectedMode == "demo"
         reconnectAttempts = 0
         prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).putString("accountMode", selectedMode).apply()
         show("Requesting Deriv ${selectedMode.uppercase()} connection…")
@@ -341,7 +368,7 @@ class MainActivity : AppCompatActivity() {
         }
         val mode = prefs.getString("accountMode", "demo").orEmpty()
         if (mode != "demo") {
-            show("Automatic reconnect blocked: only the saved Demo mode can reconnect in this build. Connect manually.")
+            show("Automatic reconnect blocked for Real mode. Reconnect manually after checking your Deriv account.")
             return
         }
         show("Reconnecting to Deriv Demo (attempt ${reconnectAttempts}/5)…")
@@ -451,7 +478,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!api.connected) { show("Connect the selected Deriv account first."); return }
-        if (selectedMode != "demo" || prefs.getString("accountMode", "demo") != "demo" || api.connectedMode != "demo") { show("Safety lock: this build permits automated trading only on a verified Demo connection."); return }
+        if (selectedMode == "real" && !realUnlocked) { show("Real trading is locked until verified Demo tests and explicit approval."); return }
+        if (prefs.getString("accountMode", "demo") != selectedMode || api.connectedMode != selectedMode) { show("Safety lock: the authenticated Deriv account does not match the selected account mode."); return }
         prefs.edit()
             .putString("stake", stake.text.toString())
             .putString("multiplier", multiplier.text.toString())
@@ -464,6 +492,7 @@ class MainActivity : AppCompatActivity() {
             .apply()
         val dailyStats = calculateTodayRiskStats()
         val config = TraderConfig(
+            accountMode = selectedMode,
             candleSeconds = 5L,
             stake = stakeValue,
             multiplier = multiplierValue,
@@ -525,6 +554,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveTrade(record: TradeRecord) {
+        if (record.status == "CLOSED" && api.connectedMode == "demo" &&
+            (record.direction == "UP" || record.direction == "DOWN")) {
+            prefs.edit().putBoolean("demo_closed_trade_verified", true).apply()
+        }
         val all = JSONArray(prefs.getString("trade_history", "[]") ?: "[]")
         all.put(JSONObject()
             .put("id", record.contractId)
