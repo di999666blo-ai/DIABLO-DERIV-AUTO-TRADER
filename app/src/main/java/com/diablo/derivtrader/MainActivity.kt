@@ -38,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var log: TextView
     private lateinit var balanceView: TextView
     private lateinit var historyView: TextView
+    private lateinit var statsView: TextView
     private var connectionStatusView: TextView? = null
     private var marketStatusView: TextView? = null
     private var controller: TradingController? = null
@@ -447,7 +448,17 @@ class MainActivity : AppCompatActivity() {
             setPadding(2, 12, 2, 0)
         })
 
-        val history = section("05  /  TRADE HISTORY", "Most recent recorded contracts")
+        val stats = section("05  /  PERFORMANCE", "Calculated from locally recorded settled contracts")
+        statsView = TextView(this).apply {
+            setTextColor(white)
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(12, 12, 12, 12)
+            background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+        }
+        stats.addView(statsView)
+
+        val history = section("06  /  TRADE HISTORY", "Most recent recorded contracts")
         historyView = TextView(this).apply {
             setTextColor(white)
             textSize = 11f
@@ -911,8 +922,42 @@ class MainActivity : AppCompatActivity() {
             "#${item.optLong("id")} ${item.optString("symbol")} ${item.optString("direction")} | ${item.optString("status")} | Entry ${item.optDouble("buyPrice")} | Exit ${item.optDouble("exitPrice")} | P/L ${item.optDouble("profit")}"
         }
         historyView.text = lines.reversed().joinToString("\n").ifBlank { "No trades recorded yet." }
+        if (::statsView.isInitialized) renderPerformanceStats(all)
     }
 
+    private fun renderPerformanceStats(all: JSONArray) {
+        val closed = (0 until all.length()).mapNotNull { i ->
+            all.optJSONObject(i)?.takeIf { it.optString("status") == "CLOSED" }
+        }
+        val now = System.currentTimeMillis()
+        val dayStart = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+        }.timeInMillis
+        val weekStart = now - 7L * 24L * 60L * 60L * 1000L
+        val wins = closed.filter { it.optDouble("profit", 0.0) > 0.0 }
+        val losses = closed.filter { it.optDouble("profit", 0.0) < 0.0 }
+        val net = closed.sumOf { it.optDouble("profit", 0.0) }
+        val today = closed.filter { it.optLong("time") >= dayStart }.sumOf { it.optDouble("profit", 0.0) }
+        val week = closed.filter { it.optLong("time") >= weekStart }.sumOf { it.optDouble("profit", 0.0) }
+        val avgWin = if (wins.isEmpty()) 0.0 else wins.sumOf { it.optDouble("profit", 0.0) } / wins.size
+        val avgLoss = if (losses.isEmpty()) 0.0 else losses.sumOf { it.optDouble("profit", 0.0) } / losses.size
+        val rate = if (closed.isEmpty()) 0.0 else wins.size * 100.0 / closed.size
+        val markets = closed.groupBy { it.optString("symbol", "Unknown") }
+            .mapValues { entry -> entry.value.sumOf { it.optDouble("profit", 0.0) } }
+            .entries.sortedByDescending { it.value }.take(5)
+        val marketText = if (markets.isEmpty()) "  No settled market data" else markets.joinToString("\n") {
+            String.format(java.util.Locale.US, "  %s  %+.2f", it.key, it.value)
+        }
+        statsView.text = listOf(
+            "SETTLED: ${closed.size}   WIN RATE: ${String.format(java.util.Locale.US, "%.1f", rate)}%",
+            String.format(java.util.Locale.US, "NET P/L: %+.2f", net),
+            String.format(java.util.Locale.US, "TODAY: %+.2f   7 DAYS: %+.2f", today, week),
+            String.format(java.util.Locale.US, "AVG WIN: %.2f   AVG LOSS: %.2f", avgWin, avgLoss),
+            "TOP MARKETS (P/L)", marketText,
+            "Based on the latest 200 locally stored records. Balance is displayed separately."
+        ).joinToString("\n")
+    }
     private fun showConnectionStatus(message: String) {
         if (::log.isInitialized) log.text = message
         connectionStatusView?.text = message
