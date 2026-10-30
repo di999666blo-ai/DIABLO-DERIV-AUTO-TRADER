@@ -202,7 +202,7 @@ class MainActivity : AppCompatActivity() {
         navScroll.addView(nav)
         root.addView(navScroll, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 8 })
 
-        val contentScroll = ScrollView(this).apply { fillViewport = false }
+        val contentScroll = ScrollView(this).apply { isFillViewport = false }
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, 2, 0, 20)
