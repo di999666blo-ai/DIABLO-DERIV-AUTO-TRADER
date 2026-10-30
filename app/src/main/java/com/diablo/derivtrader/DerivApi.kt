@@ -65,6 +65,7 @@ class DerivApi {
                             }
                             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                                 connected = false
+                                if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", "WebSocket closed: $code $reason"))
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                                 connected = false
