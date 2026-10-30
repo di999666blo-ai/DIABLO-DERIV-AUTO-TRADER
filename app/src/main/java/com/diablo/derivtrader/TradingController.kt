@@ -16,7 +16,10 @@ data class TraderConfig(
     val dailyLossLimit: Double = 5.0,
     val maxConsecutiveLosses: Int = 3,
     val maxTradesPerDay: Int = 20,
-    val cooldownMillis: Long = 30_000L
+    val cooldownMillis: Long = 30_000L,
+    val initialRealizedPnl: Double = 0.0,
+    val initialConsecutiveLosses: Int = 0,
+    val initialTradesToday: Int = 0
 )
 
 data class TradeRecord(
@@ -58,9 +61,9 @@ class TradingController(
     )
     private var currency = config.currency
     private var lastEntryMillis = 0L
-    private var realizedPnl = 0.0
-    private var consecutiveLosses = 0
-    private var tradesToday = 0
+    private var realizedPnl = config.initialRealizedPnl
+    private var consecutiveLosses = config.initialConsecutiveLosses
+    private var tradesToday = config.initialTradesToday
     private var openContractId: Long? = null
     private var openContractSymbol = ""
     private var closeRequestSent = false
