@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.widget.*
+import com.google.android.material.bottomnavigation.BottomNavigationView
+import android.view.Menu
 import androidx.appcompat.app.AppCompatActivity
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -40,6 +42,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var historyView: TextView
     private lateinit var statsView: TextView
     private lateinit var liveActivityView: TextView
+    private lateinit var portfolioView: TextView
     private val liveActivityLines = mutableListOf<String>()
     private val lastContractActivityAt = mutableMapOf<Long, Long>()
     private var connectionStatusView: TextView? = null
@@ -246,11 +249,6 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, 48, 1f).apply { marginStart = 8 })
         hero.addView(modeRow)
         root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
-
-        val navScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        navScroll.addView(nav)
-        root.addView(navScroll, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 8 })
 
         val contentScroll = ScrollView(this).apply { isFillViewport = false }
         val content = LinearLayout(this).apply {
@@ -498,18 +496,50 @@ class MainActivity : AppCompatActivity() {
         }
         history.addView(historyView)
 
-        val destinations = listOf("OVERVIEW" to overview, "CONNECT" to connection, "MARKETS" to marketsCard, "RISK" to risk, "LIVE" to live, "HISTORY" to history)
-        destinations.forEach { (title, target) ->
-            nav.addView(Button(this).apply {
-                text = title
-                isAllCaps = false
-                textSize = 10f
-                setTextColor(white)
-                background = rounded(0xFF101D31.toInt(), 0xFF29466C.toInt(), 10f)
-                setPadding(12, 0, 12, 0)
-                setOnClickListener { contentScroll.post { contentScroll.smoothScrollTo(0, target.top) } }
-            }, LinearLayout.LayoutParams(-2, 42).apply { marginEnd = 6 })
+        val portfolio = section("PORTFOLIO / OPEN POSITIONS", "Actual open contracts returned by your connected Deriv account.")
+        portfolioView = TextView(this).apply {
+            text = "Connect your Deriv account, then refresh to load live open positions."
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(white)
+            setPadding(12, 12, 12, 12)
+            background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+            minHeight = 100
         }
+        portfolio.addView(portfolioView)
+        action(portfolio, "REFRESH OPEN POSITIONS") { refreshPortfolio() }
+
+        // The app currently uses one native Activity with real, populated dashboard sections.
+        // Bottom navigation scrolls to those sections; it does not create empty placeholder fragments.
+        val bottomNav = BottomNavigationView(this).apply {
+            setBackgroundColor(0xFF0A0D14.toInt())
+            itemIconTintList = android.content.res.ColorStateList(
+                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                intArrayOf(red, muted)
+            )
+            itemTextColor = itemIconTintList
+            labelVisibilityMode = com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
+            val targets = linkedMapOf<Int, android.view.View>()
+            fun addDestination(title: String, icon: Int, target: android.view.View) {
+                val id = android.view.View.generateViewId()
+                menu.add(Menu.NONE, id, menu.size(), title).setIcon(icon)
+                targets[id] = target
+            }
+            addDestination("Markets", android.R.drawable.ic_menu_search, marketsCard)
+            addDestination("Risk", android.R.drawable.ic_lock_lock, risk)
+            addDestination("Portfolio", android.R.drawable.ic_menu_agenda, portfolio)
+            addDestination("Live", android.R.drawable.ic_media_play, live)
+            addDestination("Connect", android.R.drawable.ic_menu_manage, connection)
+            setOnItemSelectedListener { item ->
+                val target = targets[item.itemId] ?: return@setOnItemSelectedListener false
+                contentScroll.post {
+                    val y = (target.top - content.paddingTop).coerceAtLeast(0)
+                    contentScroll.smoothScrollTo(0, y)
+                }
+                true
+            }
+        }
+        root.addView(bottomNav, LinearLayout.LayoutParams(-1, (64 * resources.displayMetrics.density).toInt()))
 
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
@@ -649,11 +679,49 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     showConnectionStatus("✅ Authenticated Deriv ${selectedMode.uppercase()} WebSocket connected. Load markets next.")
+                    refreshPortfolio()
                 }.onFailure { showConnectionStatus("❌ Connection failed: ${it.message}") }
             }
         }
     }
 
+
+    private fun refreshPortfolio() {
+        if (!::portfolioView.isInitialized) return
+        if (!api.connected) {
+            portfolioView.text = "NOT CONNECTED. Connect your Deriv account to retrieve its portfolio."
+            return
+        }
+        portfolioView.text = "Loading open positions from Deriv…"
+        api.portfolio { result ->
+            runOnUiThread {
+                result.onSuccess { response ->
+                    val portfolio = response.optJSONObject("portfolio")
+                    val contracts = portfolio?.optJSONArray("contracts")
+                    val lines = mutableListOf<String>()
+                    lines.add("ACCOUNT: ${api.connectedMode?.uppercase() ?: "CONNECTED"}")
+                    lines.add("OPEN CONTRACTS: ${contracts?.length() ?: 0}")
+                    if (contracts != null) {
+                        for (i in 0 until contracts.length()) {
+                            val item = contracts.optJSONObject(i) ?: continue
+                            val id = item.optLong("contract_id")
+                            val symbol = item.optString("underlying", item.optString("symbol", "Unknown"))
+                            val type = item.optString("contract_type", "CONTRACT")
+                            val buy = item.optDouble("buy_price", 0.0)
+                            val profit = item.optDouble("profit", 0.0)
+                            lines.add("#$id  $symbol  $type")
+                            lines.add(String.format(java.util.Locale.US, "   BUY %.2f   LIVE P/L %+.2f", buy, profit))
+                        }
+                    }
+                    portfolioView.text = if (contracts == null || contracts.length() == 0)
+                        lines.joinToString("\\n") + "\\nNo currently open positions on this account."
+                    else lines.joinToString("\\n")
+                }.onFailure {
+                    portfolioView.text = "Portfolio request failed: ${it.message}"
+                }
+            }
+        }
+    }
 
     private fun scheduleReconnect() {
         if (!reconnectEnabled || reconnectAttempts >= 5) {
