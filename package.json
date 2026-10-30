@@ -3,7 +3,15 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
-  "scripts": { "start": "node src/server.js", "test": "node --test", "check": "node --check src/server.js && node --check src/deriv.js && node --check src/strategy.js" },
-  "dependencies": { "ws": "^8.18.3" }
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/deriv.js && node --check src/strategy.js && node --check src/risk.js && node --check src/portfolio.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
 }
