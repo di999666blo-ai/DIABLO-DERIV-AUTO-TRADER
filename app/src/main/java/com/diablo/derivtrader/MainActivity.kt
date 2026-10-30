@@ -982,6 +982,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             appendLiveActivity("$outcome | #${record.contractId} ${record.symbol} ${record.direction} | P/L ${String.format(java.util.Locale.US, "%+.2f", record.profit)}")
                             saveTrade(record)
+                            refreshPortfolio()
                         }
                     })
                     if (openCount > 0) {
