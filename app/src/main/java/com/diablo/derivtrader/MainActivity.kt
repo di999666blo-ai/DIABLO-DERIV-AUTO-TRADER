@@ -39,6 +39,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var balanceView: TextView
     private lateinit var historyView: TextView
     private lateinit var statsView: TextView
+    private lateinit var liveActivityView: TextView
+    private val liveActivityLines = mutableListOf<String>()
+    private val lastContractActivityAt = mutableMapOf<Long, Long>()
     private var connectionStatusView: TextView? = null
     private var marketStatusView: TextView? = null
     private var controller: TradingController? = null
@@ -99,8 +102,18 @@ class MainActivity : AppCompatActivity() {
                     accountCurrency = it.optString("currency", accountCurrency)
                     if (amount.isFinite()) balanceView.text = "${api.connectedMode?.uppercase() ?: "ACCOUNT"} BALANCE: $amount $accountCurrency"
                 }
-                message.optJSONObject("proposal_open_contract")?.let {
-                    show("Contract ${it.optLong("contract_id")} | ${it.optString("status")} | P/L ${it.optDouble("profit")}")
+                message.optJSONObject("proposal_open_contract")?.let { contract ->
+                    val contractId = contract.optLong("contract_id")
+                    val now = System.currentTimeMillis()
+                    val previous = lastContractActivityAt[contractId] ?: 0L
+                    if (contractId > 0L && (now - previous >= 1200L ||
+                            contract.optBoolean("is_sold") || contract.optBoolean("is_expired"))) {
+                        lastContractActivityAt[contractId] = now
+                        appendLiveActivity(
+                            "LIVE #$contractId  ${contract.optString("status", "OPEN")}  P/L ${String.format(java.util.Locale.US, "%+.2f", contract.optDouble("profit", 0.0))}"
+                        )
+                    }
+                    show("Contract $contractId | ${contract.optString("status")} | P/L ${contract.optDouble("profit")}")
                 }
                 if (message.has("connection_error")) {
                     controller?.stop()
@@ -315,6 +328,7 @@ class MainActivity : AppCompatActivity() {
                 stateListAnimator = null
                 setOnClickListener {
                     show("Button pressed: $title")
+                    Toast.makeText(this@MainActivity, "$title", Toast.LENGTH_SHORT).show()
                     onClick()
                 }
             }, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 8 })
@@ -383,7 +397,7 @@ class MainActivity : AppCompatActivity() {
         marketSpinner.adapter = darkSpinnerAdapter(listOf("Load markets first"))
         marketsCard.addView(marketSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 6 })
         action(marketsCard, "LOAD ACTIVE MARKETS") { loadMarkets() }
-        action(marketsCard, "SELECT UP TO 20 MARKETS") { showMarketPicker() }
+        action(marketsCard, "SELECT MARKETS (UP TO 20)") { showMarketPicker() }
         action(marketsCard, "SET INDIVIDUAL MARKET QUANTITIES") { showMarketQuantityDialog() }
         action(marketsCard, "CHECK MULTUP / MULTDOWN SUPPORT") { checkMarket() }
         marketStatusView = TextView(this).apply {
@@ -452,7 +466,19 @@ class MainActivity : AppCompatActivity() {
             setPadding(2, 12, 2, 0)
         })
 
-        val stats = section("05  /  PERFORMANCE", "Calculated from locally recorded settled contracts")
+        val live = section("05  /  LIVE BOT ACTIVITY", "Watch real Deriv contract events: entry, live P/L, close, win or loss.")
+        liveActivityView = TextView(this).apply {
+            text = "WAITING FOR BOT EVENTS. Start the scanner in Demo to see live activity here."
+            setTextColor(white)
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(12, 12, 12, 12)
+            background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+            minHeight = 120
+        }
+        live.addView(liveActivityView)
+
+        val stats = section("06  /  PERFORMANCE", "Calculated from locally recorded settled contracts")
         statsView = TextView(this).apply {
             setTextColor(white)
             textSize = 11f
@@ -462,7 +488,7 @@ class MainActivity : AppCompatActivity() {
         }
         stats.addView(statsView)
 
-        val history = section("06  /  TRADE HISTORY", "Most recent recorded contracts")
+        val history = section("07  /  TRADE HISTORY", "Most recent recorded contracts")
         historyView = TextView(this).apply {
             setTextColor(white)
             textSize = 11f
@@ -710,13 +736,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMarketPicker() {
         if (markets.isEmpty()) {
-            show("Load markets first.")
+            showMarketStatus("Market list is empty. Loading Deriv public market catalogue now; tap SELECT MARKETS again when loading finishes.")
+            loadMarkets()
             return
         }
         val labels = markets.map { "${it.first} (${it.second})" }.toTypedArray()
         val checked = BooleanArray(markets.size) { markets[it].second in selectedMarkets }
         android.app.AlertDialog.Builder(this)
-            .setTitle("Choose up to 20 markets")
+            .setTitle("Choose up to 20 markets  •  ${markets.size} available")
             .setMultiChoiceItems(labels, checked) { dialog, which, isChecked ->
                 val code = markets[which].second
                 if (isChecked) {
@@ -737,7 +764,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMarketQuantityDialog() {
         val selected = selectedMarkets.toList().ifEmpty { listOfNotNull(selectedSymbol()) }
-        if (selected.isEmpty()) { show("Select markets first."); return }
+        if (selected.isEmpty()) { showMarketStatus("Select at least one market first. Load the active market list, then choose markets."); return }
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 8, 20, 8)
@@ -855,9 +882,26 @@ class MainActivity : AppCompatActivity() {
                     val contracts = response.optJSONObject("portfolio")?.optJSONArray("contracts")
                     val openCount = contracts?.length() ?: 0
                     controller = TradingController(api, config, { status ->
-                        runOnUiThread { show(status) }
+                        runOnUiThread {
+                            show(status)
+                            val lower = status.lowercase()
+                            if (listOf("opened", "settled", "closing", "close request", "feed stale",
+                                    "entry blocked", "risk lock", "scanner stopped", "live tick feed",
+                                    "contract checks complete", "buy rejected", "proposal rejected").any { lower.contains(it) }) {
+                                appendLiveActivity(status)
+                            }
+                        }
                     }, { record ->
-                        runOnUiThread { saveTrade(record) }
+                        runOnUiThread {
+                            val outcome = when {
+                                record.status == "OPEN" -> "TRADE OPENED"
+                                record.profit > 0.0 -> "TRADE CLOSED — WIN"
+                                record.profit < 0.0 -> "TRADE CLOSED — LOSS"
+                                else -> "TRADE CLOSED — BREAKEVEN"
+                            }
+                            appendLiveActivity("$outcome | #${record.contractId} ${record.symbol} ${record.direction} | P/L ${String.format(java.util.Locale.US, "%+.2f", record.profit)}")
+                            saveTrade(record)
+                        }
                     })
                     if (openCount > 0) {
                         show("Restoring $openCount existing Deriv contract(s) before scanning. No duplicate positions will be opened.")
@@ -962,6 +1006,15 @@ class MainActivity : AppCompatActivity() {
             "Based on the latest 200 locally stored records. Balance is displayed separately."
         ).joinToString("\n")
     }
+    private fun appendLiveActivity(message: String) {
+        if (!::liveActivityView.isInitialized) return
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+            .format(java.util.Date())
+        liveActivityLines.add(0, "[$time] $message")
+        while (liveActivityLines.size > 35) liveActivityLines.removeAt(liveActivityLines.lastIndex)
+        liveActivityView.text = liveActivityLines.joinToString("\\n")
+    }
+
     private fun showConnectionStatus(message: String) {
         if (::log.isInitialized) log.text = message
         connectionStatusView?.text = message
