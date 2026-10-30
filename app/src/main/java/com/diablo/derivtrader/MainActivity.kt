@@ -280,11 +280,11 @@ class MainActivity : AppCompatActivity() {
         val checked = BooleanArray(markets.size) { markets[it].second in selectedMarkets }
         android.app.AlertDialog.Builder(this)
             .setTitle("Choose up to 20 markets")
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+            .setMultiChoiceItems(labels, checked) { dialog, which, isChecked ->
                 val code = markets[which].second
                 if (isChecked) {
                     if (selectedMarkets.size >= 20) {
-                        (it as? android.app.AlertDialog)?.listView?.setItemChecked(which, false)
+                        dialog.listView?.setItemChecked(which, false)
                         show("Maximum 20 markets.")
                     } else selectedMarkets.add(code)
                 } else selectedMarkets.remove(code)
