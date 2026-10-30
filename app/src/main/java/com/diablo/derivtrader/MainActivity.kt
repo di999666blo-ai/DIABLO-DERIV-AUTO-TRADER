@@ -20,6 +20,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var multiplier: EditText
     private lateinit var takeProfit: EditText
     private lateinit var stopLoss: EditText
+    private lateinit var dailyLoss: EditText
+    private lateinit var maxLosses: EditText
+    private lateinit var maxTrades: EditText
+    private lateinit var cooldown: EditText
     private lateinit var log: TextView
     private lateinit var balanceView: TextView
     private lateinit var historyView: TextView
@@ -120,6 +124,14 @@ class MainActivity : AppCompatActivity() {
         takeProfit = field("2.00", "2.00"); box.addView(takeProfit)
         label("STOP LOSS (ACCOUNT CURRENCY)")
         stopLoss = field("1.00", "1.00"); box.addView(stopLoss)
+        label("MAX DAILY LOSS (ACCOUNT CURRENCY)")
+        dailyLoss = field("5.00", "5.00"); box.addView(dailyLoss)
+        label("MAX CONSECUTIVE LOSSES")
+        maxLosses = field("3", "3"); box.addView(maxLosses)
+        label("MAX TRADES PER DAY")
+        maxTrades = field("20", "20"); box.addView(maxTrades)
+        label("COOLDOWN SECONDS")
+        cooldown = field("30", "30"); box.addView(cooldown)
 
         button("CHECK SELECTED MARKET MULTIPLIERS") { checkMarket() }
         button("START AUTOMATIC DEMO SCALPING") { startTrading() }
@@ -228,7 +240,11 @@ class MainActivity : AppCompatActivity() {
         val multiplierValue = multiplier.text.toString().toIntOrNull() ?: 0
         val tp = takeProfit.text.toString().toDoubleOrNull() ?: 0.0
         val sl = stopLoss.text.toString().toDoubleOrNull() ?: 0.0
-        if (stakeValue <= 0 || multiplierValue <= 0 || tp <= 0 || sl <= 0) {
+        val dailyLossValue = dailyLoss.text.toString().toDoubleOrNull() ?: 0.0
+        val lossLimit = maxLosses.text.toString().toIntOrNull() ?: 0
+        val tradesLimit = maxTrades.text.toString().toIntOrNull() ?: 0
+        val cooldownSeconds = cooldown.text.toString().toLongOrNull() ?: 0L
+        if (stakeValue <= 0 || multiplierValue <= 0 || tp <= 0 || sl <= 0 || dailyLossValue <= 0 || lossLimit <= 0 || tradesLimit <= 0 || cooldownSeconds < 0) {
             show("Stake, multiplier, take profit and stop loss must all be greater than zero.")
             return
         }
@@ -239,7 +255,11 @@ class MainActivity : AppCompatActivity() {
             multiplier = multiplierValue,
             currency = accountCurrency,
             takeProfit = tp,
-            stopLoss = sl
+            stopLoss = sl,
+            dailyLossLimit = dailyLossValue,
+            maxConsecutiveLosses = lossLimit,
+            maxTradesPerDay = tradesLimit,
+            cooldownMillis = cooldownSeconds * 1000L
         )
         controller = TradingController(api, config, { status ->
             runOnUiThread { show(status) }
