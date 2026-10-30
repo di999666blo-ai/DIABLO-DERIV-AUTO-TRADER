@@ -212,7 +212,7 @@ class TradingController(
     private fun requestEntry(symbol: String, signal: TradeSignal) {
         if (!running.get() || openContractId != null || emergencyStop) return
         onStatus("Requesting ${signal.direction} multiplier proposal on $symbol…")
-        api.multiplierProposal(symbol, signal.direction.name, config.stake, config.multiplier, currency) { result ->
+        api.multiplierProposal(symbol, signal.direction.name, config.stake, config.multiplier, currency, config.takeProfit, config.stopLoss) { result ->
             result.onSuccess proposalResponse@ { response ->
                 val proposal = response.optJSONObject("proposal")
                 val proposalId = proposal?.optString("id").orEmpty()
