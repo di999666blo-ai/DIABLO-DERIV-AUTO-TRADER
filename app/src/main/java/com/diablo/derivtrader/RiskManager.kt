@@ -1,0 +1,45 @@
+package com.diablo.derivtrader
+
+data class RiskSettings(
+    val stake: Double = 1.0,
+    val multiplier: Int = 10,
+    val takeProfit: Double = 2.0,
+    val stopLoss: Double = 1.0,
+    val maxOpenPositions: Int = 1,
+    val dailyLossLimit: Double = 5.0,
+    val maxConsecutiveLosses: Int = 3,
+    val maxTradesPerDay: Int = 20,
+    val cooldownMillis: Long = 30_000L
+)
+
+data class RiskSnapshot(
+    val realizedPnlToday: Double,
+    val consecutiveLosses: Int,
+    val tradesToday: Int,
+    val openPositions: Int,
+    val lastEntryAtMillis: Long,
+    val emergencyStopped: Boolean = false
+)
+
+data class RiskDecision(val allowed: Boolean, val reason: String)
+
+class RiskManager(private val settings: RiskSettings) {
+    fun canEnter(state: RiskSnapshot, nowMillis: Long = System.currentTimeMillis()): RiskDecision {
+        if (state.emergencyStopped) return RiskDecision(false, "Emergency stop is active")
+        if (settings.stake <= 0.0 || settings.multiplier <= 0) return RiskDecision(false, "Stake and multiplier must be positive")
+        if (state.realizedPnlToday <= -settings.dailyLossLimit) return RiskDecision(false, "Daily loss limit reached")
+        if (state.consecutiveLosses >= settings.maxConsecutiveLosses) return RiskDecision(false, "Consecutive-loss limit reached")
+        if (state.tradesToday >= settings.maxTradesPerDay) return RiskDecision(false, "Daily trade limit reached")
+        if (state.openPositions >= settings.maxOpenPositions) return RiskDecision(false, "Maximum open positions reached")
+        if (state.lastEntryAtMillis > 0L && nowMillis - state.lastEntryAtMillis < settings.cooldownMillis) {
+            return RiskDecision(false, "Entry cooldown active")
+        }
+        return RiskDecision(true, "Risk checks passed")
+    }
+
+    fun exitReason(openProfit: Double): String? = when {
+        openProfit >= settings.takeProfit -> "Take-profit reached"
+        openProfit <= -settings.stopLoss -> "Stop-loss reached"
+        else -> null
+    }
+}
