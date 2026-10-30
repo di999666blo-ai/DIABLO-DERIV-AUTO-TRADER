@@ -13,6 +13,7 @@ import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
     private val api = DerivApi()
+    private lateinit var splash: DiabloSplashView
     private lateinit var prefs: android.content.SharedPreferences
     private lateinit var pat: EditText
     private lateinit var appId: EditText
@@ -47,7 +48,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val splash = DiabloSplashView(this)
+        splash = DiabloSplashView(this)
         setContentView(splash)
         splash.setProgress(12, "INITIALISING SECURE STORAGE")
         prefs = try {
