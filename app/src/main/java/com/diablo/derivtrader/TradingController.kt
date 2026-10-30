@@ -20,7 +20,8 @@ data class TraderConfig(
     val cooldownMillis: Long = 30_000L,
     val initialRealizedPnl: Double = 0.0,
     val initialConsecutiveLosses: Int = 0,
-    val initialTradesToday: Int = 0
+    val initialTradesToday: Int = 0,
+    val maxOpenPositions: Int = 1
 )
 
 data class TradeRecord(
