@@ -15,6 +15,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var pat: EditText
     private lateinit var appId: EditText
     private lateinit var account: EditText
+    private lateinit var accountSpinner: Spinner
+    private val demoAccounts = mutableListOf<JSONObject>()
     private lateinit var marketSpinner: Spinner
     private lateinit var stake: EditText
     private lateinit var multiplier: EditText
@@ -105,8 +107,21 @@ class MainActivity : AppCompatActivity() {
         pat = field("PAT with trade permission", secret = true); box.addView(pat)
         label("DERIV APP ID")
         appId = field("App ID"); box.addView(appId)
-        label("DERIV DEMO OPTIONS ACCOUNT ID")
+        label("DERIV DEMO OPTIONS ACCOUNT")
         account = field("Demo account ID"); box.addView(account)
+        button("LOAD MY DERIV ACCOUNTS") { loadAccounts() }
+        accountSpinner = Spinner(this)
+        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
+        accountSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                val item = demoAccounts.getOrNull(position) ?: return
+                account.setText(item.optString("account_id"))
+                accountCurrency = item.optString("currency", "USD")
+                balanceView.text = "SELECTED DEMO: ${item.optString("account_id")} | ${item.optString("balance")} ${accountCurrency}"
+            }
+        }
+        box.addView(accountSpinner)
         balanceView = TextView(this).apply { text = "DEMO BALANCE: not connected"; setTextColor(0xFF00FF7A.toInt()) }
         box.addView(balanceView)
         button("CONNECT DEMO ACCOUNT") { connect() }
@@ -163,6 +178,38 @@ class MainActivity : AppCompatActivity() {
         setContentView(scroll)
     }
 
+
+    private fun loadAccounts() {
+        val token = pat.text.toString().trim()
+        val id = appId.text.toString().trim()
+        if (token.isBlank() || id.isBlank()) {
+            show("Enter PAT and App ID first.")
+            return
+        }
+        show("Loading your Deriv accounts…")
+        api.getAccounts(token, id) { result ->
+            runOnUiThread {
+                result.onSuccess { response ->
+                    demoAccounts.clear()
+                    val data = response.optJSONArray("data")
+                    if (data != null) {
+                        for (i in 0 until data.length()) {
+                            val item = data.optJSONObject(i) ?: continue
+                            if (item.optString("account_type").equals("demo", true) ||
+                                item.optString("group").equals("demo", true)) demoAccounts.add(item)
+                        }
+                    } else {
+                        val single = response.optJSONObject("data")
+                        if (single != null && single.optString("account_type").equals("demo", true)) demoAccounts.add(single)
+                    }
+                    accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                        demoAccounts.map { "${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
+                    show("Found ${demoAccounts.size} Demo account(s). Select one, then connect.")
+                }.onFailure { show("Account discovery failed: ${it.message}") }
+            }
+        }
+    }
+
     private fun connect() {
         val token = pat.text.toString().trim()
         val id = appId.text.toString().trim()
@@ -177,17 +224,19 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 result.onSuccess {
                     show(it)
-                    api.authorize(token) { auth ->
+                    balanceView.text = "CONNECTED TO DEMO ACCOUNT: $accountId"
+                    api.balance { balanceResult ->
                         runOnUiThread {
-                            auth.onSuccess { response ->
-                                val a = response.optJSONObject("authorize")
-                                accountCurrency = a?.optString("currency", "USD") ?: "USD"
-                                balanceView.text = "CONNECTED: ${a?.optString("loginid", accountId)} | ${a?.optString("currency", accountCurrency)}"
-                                api.balance { }
-                                show("Demo authorization confirmed. Load markets.")
-                            }.onFailure { show("Authorization failed: ${it.message}") }
+                            balanceResult.onSuccess { response ->
+                                val b = response.optJSONObject("balance")
+                                if (b != null) {
+                                    accountCurrency = b.optString("currency", accountCurrency)
+                                    balanceView.text = "DEMO BALANCE: ${b.optDouble("balance")} $accountCurrency"
+                                }
+                            }.onFailure { show("Balance request failed: ${it.message}") }
                         }
                     }
+                    show("Authenticated Demo WebSocket connected. Load markets.")
                 }.onFailure { show("Connection failed: ${it.message}") }
             }
         }
