@@ -14,10 +14,14 @@ class DerivApi {
     private val pending = mutableMapOf<Int, (Result<JSONObject>) -> Unit>()
     @Volatile var connected = false
         private set
+    @Volatile var connectedMode: String? = null
+        private set
     var onUpdate: ((JSONObject) -> Unit)? = null
 
     @Synchronized
     fun connect(token: String, appId: String, accountId: String, mode: String, done: (Result<String>) -> Unit) {
+        if (mode != "demo" && mode != "real") { done(Result.failure(IllegalArgumentException("Invalid account mode"))); return }
+        disconnect()
         val req = Request.Builder()
             .url("https://api.derivws.com/trading/v1/options/accounts/$accountId/otp")
             .post(ByteArray(0).toRequestBody())
@@ -44,6 +48,7 @@ class DerivApi {
                         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
                                 connected = true
+                                connectedMode = mode
                                 done(Result.success("Connected to Deriv ${mode.uppercase()}"))
                             }
                             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -62,10 +67,12 @@ class DerivApi {
                             }
                             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                                 connected = false
+                                connectedMode = null
                                 if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", "WebSocket closed: $code $reason"))
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                                 connected = false
+                                connectedMode = null
                                 onUpdate?.invoke(JSONObject().put("connection_error", t.message ?: "WebSocket failure"))
                             }
                         })
@@ -172,6 +179,7 @@ class DerivApi {
     @Synchronized
     fun disconnect() {
         connected = false
+        connectedMode = null
         ws?.close(1000, "App stopped")
         ws = null
         synchronized(pending) { pending.clear() }
