@@ -33,6 +33,6 @@ export class RiskGuard {
   }
   emergencyStop(){this.stopped=true;}
   arm(){this.stopped=false;}
-  restore(saved){if(!saved||typeof saved!=="object")return;this.day=saved.day||this.day;this.rollover();for(const k of ["trades","loss","consecutiveLosses","lastTradeAt","openTrades","currentStake"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};}
+  restore(saved){if(!saved||typeof saved!=="object")return;this.day=saved.day||this.day;this.rollover();for(const k of ["trades","consecutiveLosses","lastTradeAt","openTrades","currentStake"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);if(Number.isFinite(Number(saved.dailyLoss)))this.loss=Number(saved.dailyLoss);else if(Number.isFinite(Number(saved.loss)))this.loss=Number(saved.loss);if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};}
   snapshot(){this.rollover();return{day:this.day,stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,openByMarket:{...this.openByMarket},limits:this.limits};}
 }
