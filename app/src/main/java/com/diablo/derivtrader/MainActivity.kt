@@ -816,7 +816,7 @@ class MainActivity : AppCompatActivity() {
         val results = mutableListOf<String>()
         fun checkNext(index: Int) {
             if (index >= symbols.size) {
-                showMarketStatus(results.joinToString("\\n"))
+                showMarketStatus(results.joinToString("\n"))
                 return
             }
             val symbol = symbols[index]
