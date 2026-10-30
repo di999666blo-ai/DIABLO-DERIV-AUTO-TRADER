@@ -498,7 +498,7 @@ class MainActivity : AppCompatActivity() {
         }
         history.addView(historyView)
 
-        val destinations = listOf("OVERVIEW" to overview, "CONNECT" to connection, "MARKETS" to marketsCard, "RISK" to risk, "HISTORY" to history)
+        val destinations = listOf("OVERVIEW" to overview, "CONNECT" to connection, "MARKETS" to marketsCard, "RISK" to risk, "LIVE" to live, "HISTORY" to history)
         destinations.forEach { (title, target) ->
             nav.addView(Button(this).apply {
                 text = title
@@ -807,18 +807,33 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkMarket() {
-        val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
-        api.contractsFor(selected) { result ->
-            runOnUiThread {
-                result.onSuccess { response ->
-                    val available = response.optJSONObject("contracts_for")?.optJSONArray("available")
-                    val supported = (0 until (available?.length() ?: 0)).mapNotNull {
-                        available?.optJSONObject(it)?.optString("contract_type")
-                    }.filter { it == "MULTUP" || it == "MULTDOWN" }.distinct()
-                    show("$selected multiplier support: ${supported.joinToString().ifBlank { "not available" }}")
-                }.onFailure { show("Contract check failed: ${it.message}") }
+        val symbols = selectedMarkets.toList().ifEmpty { listOfNotNull(selectedSymbol()) }
+        if (symbols.isEmpty()) {
+            showMarketStatus("Load active markets and select at least one pair before checking multiplier support.")
+            return
+        }
+        showMarketStatus("Checking MULTUP / MULTDOWN support for ${symbols.size} selected market(s)…")
+        val results = mutableListOf<String>()
+        fun checkNext(index: Int) {
+            if (index >= symbols.size) {
+                showMarketStatus(results.joinToString("\\n"))
+                return
+            }
+            val symbol = symbols[index]
+            api.contractsFor(symbol) { result ->
+                runOnUiThread {
+                    result.onSuccess { response ->
+                        val available = response.optJSONObject("contracts_for")?.optJSONArray("available")
+                        val supported = (0 until (available?.length() ?: 0)).mapNotNull {
+                            available?.optJSONObject(it)?.optString("contract_type")
+                        }.filter { it == "MULTUP" || it == "MULTDOWN" }.distinct()
+                        results.add("$symbol: ${supported.joinToString().ifBlank { "NOT AVAILABLE" }}")
+                    }.onFailure { results.add("$symbol: ERROR — ${it.message}") }
+                    checkNext(index + 1)
+                }
             }
         }
+        checkNext(0)
     }
 
     private fun startTrading() {
