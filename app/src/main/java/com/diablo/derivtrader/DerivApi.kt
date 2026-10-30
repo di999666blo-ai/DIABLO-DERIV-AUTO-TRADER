@@ -97,6 +97,12 @@ class DerivApi {
         }
     }
 
+    fun authorize(token: String, done: (Result<JSONObject>) -> Unit) =
+        request(JSONObject().put("authorize", token), done)
+
+    fun balance(done: (Result<JSONObject>) -> Unit) =
+        request(JSONObject().put("balance", 1).put("subscribe", 1), done)
+
     fun markets(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("active_symbols", "brief"), done)
 
