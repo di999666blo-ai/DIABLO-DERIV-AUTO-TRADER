@@ -45,12 +45,16 @@ class DerivApi {
                             !parsed.encodedPath.endsWith(if (mode == "real") "/ws/real" else "/ws/demo")) {
                             throw Exception("Unexpected Deriv $mode endpoint")
                         }
+                        val callbackDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
+                        fun finishConnection(result: Result<String>) {
+                            if (callbackDelivered.compareAndSet(false, true)) done(result)
+                        }
                         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
                                 if (ws !== webSocket) { webSocket.close(1000, "Superseded connection"); return }
                                 connected = true
                                 connectedMode = mode
-                                done(Result.success("Connected to Deriv ${mode.uppercase()}"))
+                                finishConnection(Result.success("Connected to Deriv ${mode.uppercase()}"))
                             }
                             override fun onMessage(webSocket: WebSocket, text: String) {
                                 if (ws !== webSocket) return
@@ -59,9 +63,19 @@ class DerivApi {
                                     val id = message.optInt("req_id", -1)
                                     synchronized(pending) {
                                         pending.remove(id)?.invoke(
-                                            if (message.has("error")) Result.failure(
-                                                Exception(message.optJSONObject("error")?.optString("message") ?: "Deriv error")
-                                            ) else Result.success(message)
+                                            when {
+                                                message.has("error") -> Result.failure(
+                                                    Exception(message.optJSONObject("error")?.optString("message") ?: "Deriv error")
+                                                )
+                                                message.optJSONArray("errors")?.length()?.let { it > 0 } == true -> {
+                                                    val errors = message.optJSONArray("errors")!!
+                                                    val details = (0 until errors.length()).mapNotNull { index ->
+                                                        errors.optJSONObject(index)?.optString("message")?.takeIf { it.isNotBlank() }
+                                                    }.joinToString("; ")
+                                                    Result.failure(Exception(details.ifBlank { "Deriv rejected the request" }))
+                                                }
+                                                else -> Result.success(message)
+                                            }
                                         )
                                     }
                                     onUpdate?.invoke(message)
@@ -71,13 +85,18 @@ class DerivApi {
                                 if (ws !== webSocket) return
                                 connected = false
                                 connectedMode = null
-                                if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", "WebSocket closed: $code $reason"))
+                                val message = "Deriv WebSocket closed: $code ${reason.ifBlank { "(no reason supplied)" }}"
+                                finishConnection(Result.failure(Exception(message)))
+                                if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", message))
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                                 if (ws !== webSocket) return
                                 connected = false
                                 connectedMode = null
-                                onUpdate?.invoke(JSONObject().put("connection_error", t.message ?: "WebSocket failure"))
+                                val httpDetail = response?.let { " (HTTP ${it.code})" }.orEmpty()
+                                val message = "Deriv WebSocket failed$httpDetail: ${t.message ?: "network or handshake error"}"
+                                finishConnection(Result.failure(Exception(message)))
+                                onUpdate?.invoke(JSONObject().put("connection_error", message))
                             }
                         })
                     } catch (e: Exception) {
