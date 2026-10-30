@@ -7,6 +7,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
 data class TraderConfig(
+    val accountMode: String = "demo",
     val candleSeconds: Long = 5L,
     val stake: Double = 1.0,
     val multiplier: Int = 10,
@@ -79,8 +80,9 @@ class TradingController(
 
     @Synchronized
     fun start(selectedSymbols: List<String>, accountCurrency: String = config.currency) {
-        if (!api.connected || api.connectedMode != "demo") {
-            onStatus("Safety lock: connect a verified Deriv Demo account before starting automated trading.")
+        if (!api.connected || api.connectedMode != config.accountMode ||
+            (config.accountMode != "demo" && config.accountMode != "real")) {
+            onStatus("Safety lock: the authenticated Deriv account does not match the selected trading mode.")
             return
         }
         if (running.get()) {
@@ -237,7 +239,7 @@ class TradingController(
                             tradesToday++
                         }
                         onTrade(TradeRecord(id, symbol, signal.direction.name, askPrice, 0.0, 0.0, "OPEN", signal.reason))
-                        onStatus("Demo contract opened: $id on $symbol. Monitoring live P/L.")
+                        onStatus("${config.accountMode.uppercase()} contract opened: $id on $symbol. Monitoring live P/L.")
                         api.monitor(id) { monitorResult ->
                             monitorResult.onSuccess { monitorResponse ->
                                 openContractSubscriptionId = monitorResponse.optJSONObject("subscription")?.optString("id")
