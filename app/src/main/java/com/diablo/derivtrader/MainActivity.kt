@@ -714,7 +714,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     portfolioView.text = if (contracts == null || contracts.length() == 0)
-                        lines.joinToString("\\n") + "\\nNo currently open positions on this account."
+                        lines.joinToString("\n") + "\nNo currently open positions on this account."
                     else lines.joinToString("\\n")
                 }.onFailure {
                     portfolioView.text = "Portfolio request failed: ${it.message}"
