@@ -18,10 +18,6 @@ class DerivApi {
 
     @Synchronized
     fun connect(token: String, appId: String, accountId: String, mode: String, done: (Result<String>) -> Unit) {
-        if (mode != "demo") {
-            done(Result.failure(Exception("Real mode locked until demo validation")))
-            return
-        }
         val req = Request.Builder()
             .url("https://api.derivws.com/trading/v1/options/accounts/$accountId/otp")
             .post(ByteArray(0).toRequestBody())
@@ -42,13 +38,13 @@ class DerivApi {
                         val url = JSONObject(raw).optJSONObject("data")?.optString("url").orEmpty()
                         val parsed = url.toHttpUrlOrNull() ?: throw Exception("Invalid Deriv WebSocket URL")
                         if (parsed.scheme != "wss" || parsed.host != "api.derivws.com" ||
-                            !parsed.encodedPath.endsWith("/ws/demo")) {
-                            throw Exception("Unexpected Deriv demo endpoint")
+                            !parsed.encodedPath.endsWith(if (mode == "real") "/ws/real" else "/ws/demo")) {
+                            throw Exception("Unexpected Deriv $mode endpoint")
                         }
                         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
                                 connected = true
-                                done(Result.success("Connected to Deriv Demo"))
+                                done(Result.success("Connected to Deriv ${mode.uppercase()}"))
                             }
                             override fun onMessage(webSocket: WebSocket, text: String) {
                                 try {
