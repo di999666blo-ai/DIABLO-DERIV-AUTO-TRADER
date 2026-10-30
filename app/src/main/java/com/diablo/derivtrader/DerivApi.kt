@@ -1,0 +1,52 @@
+package com.diablo.derivtrader
+import okhttp3.*
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import org.json.JSONObject
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+class DerivApi {
+ private val http=OkHttpClient.Builder().callTimeout(20,TimeUnit.SECONDS).build()
+ private var ws:WebSocket?=null
+ private var reqId=1
+ private val pending=mutableMapOf<Int,(Result<JSONObject>)->Unit>()
+ @Volatile var connected=false; private set
+ var onUpdate:((JSONObject)->Unit)?=null
+ fun connect(token:String,appId:String,accountId:String,mode:String,done:(Result<String>)->Unit) {
+  if(mode!="demo") { done(Result.failure(Exception("Real mode locked until demo validation"))); return }
+  val req=Request.Builder().url("https://api.derivws.com/trading/v1/options/accounts/$accountId/otp").post(ByteArray(0).toRequestBody()).header("Authorization","Bearer $token").header("Deriv-App-ID",appId).build()
+  http.newCall(req).enqueue(object:Callback {
+   override fun onFailure(call:Call,e:IOException){done(Result.failure(e))}
+   override fun onResponse(call:Call,response:Response){response.use {
+    val raw=it.body?.string().orEmpty()
+    if(!it.isSuccessful){done(Result.failure(Exception("Deriv OTP HTTP ${it.code}: $raw")));return}
+    try {
+     val url=JSONObject(raw).optJSONObject("data")?.optString("url").orEmpty()
+     val parsed=url.toHttpUrlOrNull()?:throw Exception("Invalid Deriv WebSocket URL")
+     if(parsed.scheme!="wss"||parsed.host!="api.derivws.com"||!parsed.encodedPath.endsWith("/ws/demo"))throw Exception("Unexpected Deriv demo endpoint")
+     ws=http.newWebSocket(Request.Builder().url(url).build(),object:WebSocketListener(){
+      override fun onOpen(webSocket:WebSocket,response:Response){connected=true;done(Result.success("Connected to Deriv Demo"))}
+      override fun onMessage(webSocket:WebSocket,text:String){try{val m=JSONObject(text);val id=m.optInt("req_id",-1);pending.remove(id)?.invoke(if(m.has("error"))Result.failure(Exception(m.optJSONObject("error")?.optString("message")?:"Deriv error")) else Result.success(m));onUpdate?.invoke(m)}catch(_:Exception){}}
+      override fun onClosed(webSocket:WebSocket,code:Int,reason:String){connected=false}
+      override fun onFailure(webSocket:WebSocket,t:Throwable,response:Response?){connected=false}
+     })
+    }catch(e:Exception){done(Result.failure(e))}
+   }}
+  })
+ }
+ fun request(data:JSONObject,done:(Result<JSONObject>)->Unit){
+  val socket=ws;if(!connected||socket==null){done(Result.failure(Exception("Connect Deriv first")));return}
+  val id=reqId++;data.put("req_id",id);pending[id]=done
+  if(!socket.send(data.toString())){pending.remove(id);done(Result.failure(Exception("WebSocket send failed")))}
+ }
+ fun markets(done:(Result<JSONObject>)->Unit)=request(JSONObject().put("active_symbols","brief"),done)
+ fun contractsFor(symbol:String,done:(Result<JSONObject>)->Unit)=request(JSONObject().put("contracts_for",symbol),done)
+ fun multiplierProposal(symbol:String,direction:String,stake:Double,multiplier:Int,currency:String,done:(Result<JSONObject>)->Unit){
+  require(direction=="UP"||direction=="DOWN")
+  request(JSONObject().put("proposal",1).put("amount",stake).put("basis","stake").put("contract_type",if(direction=="UP")"MULTUP" else "MULTDOWN").put("currency",currency).put("multiplier",multiplier).put("underlying_symbol",symbol),done)
+ }
+ fun buy(proposalId:String,price:Double,done:(Result<JSONObject>)->Unit)=request(JSONObject().put("buy",proposalId).put("price",price),done)
+ fun monitor(contractId:Long,done:(Result<JSONObject>)->Unit)=request(JSONObject().put("proposal_open_contract",1).put("contract_id",contractId).put("subscribe",1),done)
+ fun sell(contractId:Long,done:(Result<JSONObject>)->Unit)=request(JSONObject().put("sell",contractId).put("price",0),done)
+ fun disconnect(){connected=false;ws?.close(1000,"App stopped");ws=null;pending.clear()}
+}
