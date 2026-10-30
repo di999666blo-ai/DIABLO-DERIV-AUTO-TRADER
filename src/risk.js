@@ -1,6 +1,6 @@
 export class RiskGuard {
   constructor(limits = {}) {
-    this.limits = { dailyLoss: 10, tradesPerDay: 100, consecutiveLosses: 3, cooldownMs: 120000, maxStake: 5, maxOpenTrades: 100, maxTradesPerMarket: 20, baseStake: 1, ...limits };
+    this.limits = { dailyLoss: 10, tradesPerDay: 100, consecutiveLosses: 3, cooldownMs: 120000, maxStake: 5, allowLive: false, maxOpenTrades: 100, maxTradesPerMarket: 20, baseStake: 1, ...limits };
     this.day = this.dayKey(); this.reset(); this.stopped = true;
     this.currentStake = Math.min(this.limits.baseStake, this.limits.maxStake);
   }
@@ -19,7 +19,7 @@ export class RiskGuard {
   }
   canTrade({stake=this.currentStake,autoTrade=false,mode="demo",symbol="UNKNOWN",ignoreCooldown=false}={}) {
     this.rollover();
-    if(mode!=="demo")return{ok:false,reason:"Real-money execution is locked in this build"};
+    if(mode!=="demo"&&!(mode==="real"&&this.limits.allowLive))return{ok:false,reason:"Live trading is not explicitly enabled in local configuration"};
     if(this.stopped)return{ok:false,reason:"Emergency stop is active"};
     if(!autoTrade)return{ok:false,reason:"Demo execution is not enabled"};
     const amount=Number(stake);
