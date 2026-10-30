@@ -286,8 +286,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (selectedMode == "real") { show("Real mode is safety-locked pending verified Demo testing."); return }
-        val detectedMode = accountModeOfId(accountId)
-        if (detectedMode != selectedMode) { show("Account/mode mismatch: this account ID is detected as $detectedMode, but ${selectedMode.uppercase()} is selected. Choose the correct account."); return }
+        val accountRecord = demoAccounts.firstOrNull { it.optString("account_id") == accountId }
+        val detectedMode = accountRecord?.let { accountModeOf(it) } ?: accountModeOfId(accountId)
+        if (detectedMode == "unknown") { show("Account type could not be verified. Tap LOAD MY DERIV ACCOUNTS and select the account from the list."); return }
+        if (detectedMode != selectedMode) { show("Account/mode mismatch: selected account is $detectedMode, but ${selectedMode.uppercase()} is selected. Choose the matching account."); return }
         reconnectEnabled = true
         reconnectAttempts = 0
         prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).putString("accountMode", selectedMode).apply()
@@ -338,8 +340,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val mode = prefs.getString("accountMode", "demo").orEmpty()
-        if (mode == "real" || accountModeOfId(accountId) != "demo") {
-            show("Automatic reconnect blocked: only a verified Demo account can reconnect in this build. Connect manually.")
+        if (mode != "demo") {
+            show("Automatic reconnect blocked: only the saved Demo mode can reconnect in this build. Connect manually.")
             return
         }
         show("Reconnecting to Deriv Demo (attempt ${reconnectAttempts}/5)…")
