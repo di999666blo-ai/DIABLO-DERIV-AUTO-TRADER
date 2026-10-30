@@ -26,10 +26,7 @@ data class TradeRecord(
     val detail: String
 )
 
-/**
- * Demo-only orchestration: live ticks -> closed candles -> signal -> risk checks ->
- * proposal -> buy -> monitor -> optional TP/SL close.
- */
+/** One shared risk gate and one-position cap across up to 20 selected markets. */
 class TradingController(
     private val api: DerivApi,
     private val config: TraderConfig,
@@ -37,9 +34,12 @@ class TradingController(
     private val onTrade: (TradeRecord) -> Unit
 ) {
     private val running = AtomicBoolean(false)
-    private val candles = ArrayList<MarketCandle>()
+    private val activeSymbols = linkedSetOf<String>()
+    private val subscriptions = linkedMapOf<String, String>()
+    private val builders = hashMapOf<String, TickCandleBuilder>()
+    private val candleHistory = hashMapOf<String, ArrayList<MarketCandle>>()
+    private val seenSignals = hashMapOf<String, MutableSet<Long>>()
     private val engine = ScalpingEngine()
-    private val candleBuilder = TickCandleBuilder(config.candleSeconds)
     private val risk = RiskManager(
         RiskSettings(
             stake = config.stake,
@@ -53,20 +53,22 @@ class TradingController(
             cooldownMillis = config.cooldownMillis
         )
     )
-    private var symbol: String = ""
-    private var currency: String = config.currency
-    private var subscriptionId: String? = null
+    private var currency = config.currency
     private var lastEntryMillis = 0L
     private var realizedPnl = 0.0
     private var consecutiveLosses = 0
     private var tradesToday = 0
     private var openContractId: Long? = null
+    private var openContractSymbol = ""
     private var closeRequestSent = false
     private var emergencyStop = false
-    private val seenSignals = HashSet<Long>()
 
     @Synchronized
-    fun start(selectedSymbol: String, accountCurrency: String = config.currency) {
+    fun start(selectedSymbol: String, accountCurrency: String = config.currency) =
+        start(listOf(selectedSymbol), accountCurrency)
+
+    @Synchronized
+    fun start(selectedSymbols: List<String>, accountCurrency: String = config.currency) {
         if (!api.connected) {
             onStatus("Connect Deriv Demo before starting the scanner.")
             return
@@ -75,17 +77,36 @@ class TradingController(
             onStatus("Scanner is already running.")
             return
         }
-        symbol = selectedSymbol
-        currency = accountCurrency
-        if (symbol.isBlank()) {
-            onStatus("Select a market first.")
+        val requested = selectedSymbols.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        if (requested.isEmpty() || requested.size > 20) {
+            onStatus("Select between 1 and 20 markets.")
             return
         }
-        running.set(true)
-        emergencyStop = false
-        candles.clear()
+        activeSymbols.clear()
+        activeSymbols.addAll(requested)
+        subscriptions.clear()
+        builders.clear()
+        candleHistory.clear()
         seenSignals.clear()
-        onStatus("Checking MULTUP/MULTDOWN availability for $symbol…")
+        requested.forEach {
+            builders[it] = TickCandleBuilder(config.candleSeconds)
+            candleHistory[it] = arrayListOf()
+            seenSignals[it] = hashSetOf()
+        }
+        currency = accountCurrency
+        emergencyStop = false
+        running.set(true)
+        onStatus("Checking multiplier contracts on ${requested.size} selected market(s)…")
+        checkNextMarket(requested, 0)
+    }
+
+    private fun checkNextMarket(symbols: List<String>, index: Int) {
+        if (!running.get()) return
+        if (index >= symbols.size) {
+            onStatus("Multiplier checks complete. Subscribing to live ticks on ${subscriptions.size} markets.")
+            return
+        }
+        val symbol = symbols[index]
         api.contractsFor(symbol) { result ->
             result.onSuccess { response ->
                 val available = response.optJSONObject("contracts_for")?.optJSONArray("available")
@@ -93,23 +114,29 @@ class TradingController(
                     available?.optJSONObject(it)?.optString("contract_type")
                 }
                 if (!types.contains("MULTUP") || !types.contains("MULTDOWN")) {
-                    running.set(false)
-                    onStatus("This market does not confirm both MULTUP and MULTDOWN. Scanner stopped.")
+                    synchronized(this) { activeSymbols.remove(symbol) }
+                    onStatus("$symbol skipped: both MULTUP and MULTDOWN are not available.")
+                    checkNextMarket(symbols, index + 1)
                     return@onSuccess
                 }
                 api.subscribeTicks(symbol) { tickResult ->
                     tickResult.onSuccess { tickResponse ->
-                        val sub = tickResponse.optJSONObject("subscription")
-                        subscriptionId = sub?.optString("id")?.takeIf { !it.isNullOrBlank() }
-                        onStatus("Live ticks subscribed: $symbol. Auto-entry is active in Demo only.")
+                        val id = tickResponse.optJSONObject("subscription")?.optString("id")
+                        synchronized(this) {
+                            if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id
+                        }
+                        onStatus("$symbol live tick subscription active.")
+                        checkNextMarket(symbols, index + 1)
                     }.onFailure {
-                        running.set(false)
-                        onStatus("Tick subscription failed: ${it.message}")
+                        synchronized(this) { activeSymbols.remove(symbol) }
+                        onStatus("$symbol tick subscription failed: ${it.message}")
+                        checkNextMarket(symbols, index + 1)
                     }
                 }
             }.onFailure {
-                running.set(false)
-                onStatus("Multiplier check failed: ${it.message}")
+                synchronized(this) { activeSymbols.remove(symbol) }
+                onStatus("$symbol contract check failed: ${it.message}")
+                checkNextMarket(symbols, index + 1)
             }
         }
     }
@@ -121,19 +148,19 @@ class TradingController(
         }
         if (!running.get()) return
         val tick = message.optJSONObject("tick") ?: return
+        val symbol = tick.optString("symbol")
+        if (symbol !in activeSymbols) return
         val quote = tick.optDouble("quote", Double.NaN)
         val epoch = tick.optLong("epoch", 0L)
-        val completed = candleBuilder.onTick(MarketTick(epoch, quote)) ?: return
+        val completed = builders[symbol]?.onTick(MarketTick(epoch, quote)) ?: return
         synchronized(this) {
+            val candles = candleHistory[symbol] ?: return
             candles.add(completed)
             if (candles.size > 300) candles.removeAt(0)
             val signal = engine.evaluate(candles.toList())
             onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | ${signal.reason}")
-            if (signal.direction == TradeDirection.WAIT || !seenSignals.add(signal.candleEpoch)) return
-            if (openContractId != null) {
-                onStatus("Signal ignored: an open position is already being managed.")
-                return
-            }
+            if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
+            if (openContractId != null) return
             val snapshot = RiskSnapshot(
                 realizedPnlToday = realizedPnl,
                 consecutiveLosses = consecutiveLosses,
@@ -147,21 +174,21 @@ class TradingController(
                 onStatus("Entry blocked: ${decision.reason}")
                 return
             }
-            requestEntry(signal)
+            requestEntry(symbol, signal)
         }
     }
 
     @Synchronized
-    private fun requestEntry(signal: TradeSignal) {
+    private fun requestEntry(symbol: String, signal: TradeSignal) {
         if (!running.get() || openContractId != null || emergencyStop) return
-        onStatus("Requesting ${signal.direction} multiplier proposal…")
+        onStatus("Requesting ${signal.direction} multiplier proposal on $symbol…")
         api.multiplierProposal(symbol, signal.direction.name, config.stake, config.multiplier, currency) { result ->
             result.onSuccess { response ->
                 val proposal = response.optJSONObject("proposal")
                 val proposalId = proposal?.optString("id").orEmpty()
                 val askPrice = proposal?.optDouble("ask_price", Double.NaN) ?: Double.NaN
                 if (proposalId.isBlank() || !askPrice.isFinite() || askPrice <= 0.0) {
-                    onStatus("Proposal response missing a valid ID or ask price; no purchase made.")
+                    onStatus("$symbol proposal missing a valid ID/ask price; no purchase made.")
                     return@onSuccess
                 }
                 api.buy(proposalId, askPrice) { buyResult ->
@@ -174,12 +201,13 @@ class TradingController(
                         }
                         synchronized(this) {
                             openContractId = id
+                            openContractSymbol = symbol
                             closeRequestSent = false
                             lastEntryMillis = System.currentTimeMillis()
                             tradesToday++
                         }
                         onTrade(TradeRecord(id, symbol, signal.direction.name, askPrice, 0.0, "OPEN", signal.reason))
-                        onStatus("Demo contract opened: $id. Monitoring live P/L.")
+                        onStatus("Demo contract opened: $id on $symbol. Monitoring live P/L.")
                         api.monitor(id) { monitorResult ->
                             monitorResult.onFailure { onStatus("Contract monitor request failed: ${it.message}") }
                         }
@@ -213,9 +241,9 @@ class TradingController(
                 consecutiveLosses = if (profit < 0.0) consecutiveLosses + 1 else 0
                 openContractId = null
                 closeRequestSent = false
-                onTrade(TradeRecord(id, symbol, contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
-                onStatus("Contract $id closed. P/L $profit | Daily P/L $realizedPnl")
-                if (realizedPnl <= -config.dailyLossLimit || consecutiveLosses >= config.maxConsecutiveLosses) {
+                onTrade(TradeRecord(id, openContractSymbol, contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
+                onStatus("Contract $id closed. P/L $profit | Session P/L $realizedPnl")
+                if (realizedPnl <= -config.dailyLossLimit || consecutiveLosses >= config.maxConsecutiveLosses || tradesToday >= config.maxTradesPerDay) {
                     emergencyStop = true
                     running.set(false)
                     onStatus("Risk lock activated. Scanner stopped.")
@@ -228,11 +256,9 @@ class TradingController(
     fun stop() {
         running.set(false)
         emergencyStop = true
-        subscriptionId?.let { id ->
-            api.unsubscribe(id) { }
-        }
-        subscriptionId = null
-        onStatus("Scanner stopped. No new trades will be opened.")
+        subscriptions.values.toList().forEach { id -> api.unsubscribe(id) { } }
+        subscriptions.clear()
+        onStatus("Scanner stopped. No new entries will be opened.")
     }
 
     fun isRunning(): Boolean = running.get()
