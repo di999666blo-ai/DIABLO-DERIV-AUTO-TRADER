@@ -9,10 +9,11 @@ The repository now contains a demo-only Deriv Options service and browser dashbo
 - Demo account connection, active market lookup and historical candles.
 - EMA 9/21 + RSI signal filter. The score is a heuristic strength score, not a win probability.
 - Contract proposal and separate explicit manual demo-buy confirmation.
-- Local emergency stop and stake/trade/loss guard primitives.
+- Local emergency stop, daily loss and consecutive-loss guard, account-wide/per-market open-trade caps, and capped win-step stake progression (1 to 5; losses hold the current step).
+- Multi-market batch planner: select 1–20 markets, set trades per market, and preview up to 100 planned orders.
 - Initial MT5 Expert Advisor source and GitHub Actions Node checks.
 
-**Still incomplete / not verified:** unattended auto-trading loop, automatic contract outcome reconciliation and durable daily P/L tracking, live candle streaming, complete trade history, MT5 compile and Strategy Tester verification, Android runtime packaging, and 24/7 hosting. This is not yet a finished autonomous bot.
+**Still incomplete / not verified:** unattended multi-market execution, automatic contract outcome reconciliation and durable daily P/L tracking, live candle streaming, complete trade history, MT5 compile and Strategy Tester verification, Android runtime packaging, and 24/7 hosting. The batch planner is preview-only; it does not place multiple orders. This is not yet a finished autonomous bot.
 
 ## Deriv Options setup
 
