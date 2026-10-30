@@ -40,7 +40,7 @@ export class TradeLedger {
   async settle(contract) {
     const id = String(contract.contract_id || contract.contractId || "");
     if (!id || this.state.closed.some(x => x.contractId === id)) return {recorded:false, duplicate:Boolean(id)};
-    const terminal = contract.is_sold === 1 || contract.is_expired === 1 || ["won","lost","sold"].includes(String(contract.status||"").toLowerCase());
+    const terminal = contract.is_sold === 1 || contract.is_sold === true || contract.is_expired === 1 || contract.is_expired === true || ["won","lost","sold"].includes(String(contract.status||"").toLowerCase());
     if (!terminal) return {recorded:false, pending:true};
     const profit = Number(contract.profit);
     if (!Number.isFinite(profit)) return {recorded:false, pending:true, reason:"Settlement profit not available yet"};
