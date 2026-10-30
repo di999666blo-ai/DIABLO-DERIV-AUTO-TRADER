@@ -1,7 +1,7 @@
 package com.diablo.derivtrader
 
 import okhttp3.*
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import java.net.URI
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
@@ -40,10 +40,22 @@ class DerivApi {
                     }
                     try {
                         val url = JSONObject(raw).optJSONObject("data")?.optString("url").orEmpty()
-                        val parsed = url.toHttpUrlOrNull() ?: throw Exception("Invalid Deriv WebSocket URL")
-                        if (parsed.scheme != "wss" || parsed.host != "api.derivws.com" ||
-                            !parsed.encodedPath.endsWith(if (mode == "real") "/ws/real" else "/ws/demo")) {
-                            throw Exception("Unexpected Deriv $mode endpoint")
+                        // java.net.URI is required here: OkHttp HttpUrl accepts only http/https,
+                        // so toHttpUrlOrNull() incorrectly rejects valid wss:// URLs.
+                        val parsed = try { URI(url) } catch (_: Exception) {
+                            throw Exception("Deriv returned a malformed WebSocket URL")
+                        }
+                        val expectedPath = if (mode == "real")
+                            "/trading/v1/options/ws/real"
+                        else
+                            "/trading/v1/options/ws/demo"
+                        val hasOtp = parsed.rawQuery.orEmpty().split("&").any {
+                            it.startsWith("otp=") && it.substringAfter("otp=").isNotBlank()
+                        }
+                        if (!parsed.scheme.equals("wss", ignoreCase = true) ||
+                            !parsed.host.equals("api.derivws.com", ignoreCase = true) ||
+                            parsed.path != expectedPath || !hasOtp) {
+                            throw Exception("Deriv returned an unexpected $mode WebSocket URL")
                         }
                         val callbackDelivered = java.util.concurrent.atomic.AtomicBoolean(false)
                         fun finishConnection(result: Result<String>) {
