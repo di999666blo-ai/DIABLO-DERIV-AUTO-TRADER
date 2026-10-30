@@ -704,11 +704,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadMarkets() {
-        if (!api.connected) {
-            showMarketStatus("Connect your Deriv account before loading its active markets.")
-            return
-        }
-        showMarketStatus("⏳ Requesting active markets from Deriv…")
+        // The active-symbol catalogue is public market data, not account-scoped.
+        // It must remain loadable even before an account is connected.
+        showMarketStatus("⏳ Loading Deriv's public market catalogue…")
         api.markets { result ->
             runOnUiThread {
                 result.onSuccess { response ->
@@ -722,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     val adapter = darkSpinnerAdapter(markets.map { "${it.first} (${it.second})" })
                     marketSpinner.adapter = adapter
-                    showMarketStatus(if (markets.isEmpty()) "Deriv returned no active markets for this account." else "✅ Loaded ${markets.size} active markets. Select one, then check multiplier support.")
+                    showMarketStatus(if (markets.isEmpty()) "Deriv public market catalogue returned zero symbols. Check the network and retry." else "✅ Loaded ${markets.size} public markets. Choose up to 20; account-specific MULTUP/MULTDOWN support is checked separately.")
                 }.onFailure { showMarketStatus("❌ Market load failed: ${it.message}") }
             }
         }
