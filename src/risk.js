@@ -16,7 +16,7 @@ export class RiskGuard {
     if(this.loss>=this.limits.dailyLoss||this.consecutiveLosses>=this.limits.consecutiveLosses)this.emergencyStop();
     return {recorded:true,currentStake:this.currentStake,stopped:this.stopped};
   }
-  canTrade({stake=this.currentStake,autoTrade=false,mode="demo",symbol="UNKNOWN"}={}) {
+  canTrade({stake=this.currentStake,autoTrade=false,mode="demo",symbol="UNKNOWN",ignoreCooldown=false}={}) {
     this.rollover();
     if(mode!=="demo")return{ok:false,reason:"Real-money execution is locked in this build"};
     if(this.stopped)return{ok:false,reason:"Emergency stop is active"};
@@ -28,10 +28,10 @@ export class RiskGuard {
     if(this.openTrades>=this.limits.maxOpenTrades)return{ok:false,reason:"Account-wide open-trade limit reached"};
     if((this.openByMarket[symbol]||0)>=this.limits.maxTradesPerMarket)return{ok:false,reason:"Per-market open-trade limit reached"};
     if(this.consecutiveLosses>=this.limits.consecutiveLosses)return{ok:false,reason:"Consecutive loss limit reached"};
-    if(Date.now()-this.lastTradeAt<this.limits.cooldownMs)return{ok:false,reason:"Cooldown active"};
+    if(!ignoreCooldown && Date.now()-this.lastTradeAt<this.limits.cooldownMs)return{ok:false,reason:"Cooldown active"};
     return{ok:true,stake:amount};
   }
   emergencyStop(){this.stopped=true;}
   arm(){this.stopped=false;}
-  snapshot(){this.rollover();return{stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,openByMarket:{...this.openByMarket},limits:this.limits};}
+  restore(saved){if(!saved||typeof saved!=="object")return;this.day=saved.day||this.day;this.rollover();for(const k of ["trades","loss","consecutiveLosses","lastTradeAt","openTrades","currentStake"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};}\n  snapshot(){this.rollover();return{day:this.day,stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,openByMarket:{...this.openByMarket},limits:this.limits};}
 }
