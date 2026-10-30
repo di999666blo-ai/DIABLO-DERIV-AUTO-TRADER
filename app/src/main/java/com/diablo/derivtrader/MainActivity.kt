@@ -94,60 +94,219 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun render() {
-        val scroll = ScrollView(this)
-        val box = LinearLayout(this).apply {
-            orientation = 1
-            setPadding(22, 18, 22, 24)
-            setBackgroundColor(0xFF02040A.toInt())
-        }
-        fun label(text: String) {
-            box.addView(TextView(this).apply {
-                this.text = text
-                textSize = 12f
-                setTextColor(0xFF9EB0CA.toInt())
-                setPadding(0, 12, 0, 2)
-            })
-        }
-        fun field(hintText: String, default: String = "", secret: Boolean = false) =
-            EditText(this).apply {
-                hint = hintText
-                setText(default)
-                setTextColor(-1)
-                setHintTextColor(0xFF8090AA.toInt())
-                setSingleLine(true)
-                if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                else inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        val pageBackground = 0xFF02040A.toInt()
+        val cardBackground = 0xFF0E172A.toInt()
+        val red = 0xFFFF0A1F.toInt()
+        val green = 0xFF00FF7A.toInt()
+        val muted = 0xFF8EA1C0.toInt()
+        val white = 0xFFF4F7FF.toInt()
+        fun rounded(color: Int, stroke: Int = 0xFF1E345A.toInt(), radius: Float = 18f) =
+            android.graphics.drawable.GradientDrawable().apply {
+                setColor(color)
+                cornerRadius = radius * resources.displayMetrics.density
+                setStroke((resources.displayMetrics.density).toInt().coerceAtLeast(1), stroke)
             }
-        fun button(title: String, action: () -> Unit) {
-            box.addView(Button(this).apply { text = title; setOnClickListener { action() } })
-        }
 
-        box.addView(TextView(this).apply {
-            text = "DIABLO DERIV AUTO TRADER"
-            textSize = 23f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFFF0A1F.toInt())
-            setPadding(0, 8, 0, 16)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(pageBackground)
+            setPadding(16, 12, 16, 8)
+        }
+        val masthead = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(2, 8, 2, 12)
+        }
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(TextView(this).apply {
+            text = "D  DIABLO"
+            textSize = 25f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(red)
         })
-        label("ACCOUNT MODE")
+        brand.addView(TextView(this).apply {
+            text = "DERIV AUTO TRADER  /  MULTIPLIER TERMINAL"
+            textSize = 9f
+            letterSpacing = 0.12f
+            setTextColor(muted)
+        })
+        masthead.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        masthead.addView(TextView(this).apply {
+            text = "●  LOCAL"
+            textSize = 10f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(green)
+            background = rounded(0xFF09251D.toInt(), 0xFF126044.toInt(), 20f)
+            setPadding(12, 8, 12, 8)
+        })
+        root.addView(masthead)
+
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(0xFF101B30.toInt(), 0xFF713044.toInt(), 22f)
+            setPadding(18, 16, 18, 16)
+        }
+        hero.addView(TextView(this).apply {
+            text = "TRADING CONTROL CENTER"
+            textSize = 10f
+            letterSpacing = 0.16f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(muted)
+        })
+        hero.addView(TextView(this).apply {
+            text = "DISCIPLINE FIRST. EXECUTION SECOND."
+            textSize = 17f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(white)
+            setPadding(0, 7, 0, 8)
+        })
+        balanceView = TextView(this).apply {
+            text = "DEMO BALANCE  •  NOT CONNECTED"
+            textSize = 15f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(green)
+        }
+        hero.addView(balanceView)
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 12, 0, 0)
+        }
         modeSpinner = Spinner(this)
-        modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, if (realUnlocked) listOf("DEMO", "REAL — UNLOCKED") else listOf("DEMO", "REAL — LOCKED"))
+        modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            if (realUnlocked) listOf("DEMO ACCOUNT", "REAL — UNLOCKED") else listOf("DEMO ACCOUNT", "REAL — LOCKED"))
         modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                if (position == 1 && !realUnlocked) { Toast.makeText(this@MainActivity, "Real mode locked until Demo verification and explicit approval.", Toast.LENGTH_LONG).show(); modeSpinner.setSelection(0); selectedMode = "demo" }
-                else selectedMode = if (position == 1) "real" else "demo"
+                if (position == 1 && !realUnlocked) {
+                    Toast.makeText(this@MainActivity, "Real mode locked until Demo verification and explicit approval.", Toast.LENGTH_LONG).show()
+                    modeSpinner.setSelection(0)
+                    selectedMode = "demo"
+                } else selectedMode = if (position == 1) "real" else "demo"
             }
         }
-        box.addView(modeSpinner)
-        button(if (realUnlocked) "REAL MODE — VERIFIED & UNLOCKED" else "VERIFY DEMO TESTS & UNLOCK REAL") { requestRealUnlock() }
-        label("DERIV PERSONAL ACCESS TOKEN")
-        pat = field("PAT with trade permission", secret = true); box.addView(pat)
-        label("DERIV APP ID")
-        appId = field("App ID"); box.addView(appId)
-        label("DERIV OPTIONS ACCOUNT (DEMO OR REAL, MATCHING MODE)")
-        account = field("Deriv Options account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }; box.addView(account)
-        button("LOAD MY DERIV ACCOUNTS") { loadAccounts() }
+        modeRow.addView(modeSpinner, LinearLayout.LayoutParams(0, 48, 1f))
+        modeRow.addView(Button(this).apply {
+            text = if (realUnlocked) "REAL UNLOCKED" else "VERIFY / UNLOCK"
+            setTextColor(white)
+            textSize = 10f
+            isAllCaps = false
+            background = rounded(0xFF35101B.toInt(), red, 12f)
+            setOnClickListener { requestRealUnlock() }
+        }, LinearLayout.LayoutParams(0, 48, 1f).apply { marginStart = 8 })
+        hero.addView(modeRow)
+        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
+
+        val navScroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        navScroll.addView(nav)
+        root.addView(navScroll, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 8 })
+
+        val contentScroll = ScrollView(this).apply { fillViewport = false }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 2, 0, 20)
+        }
+        contentScroll.addView(content)
+        root.addView(contentScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        fun section(title: String, subtitle: String = ""): LinearLayout {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(cardBackground)
+                setPadding(16, 15, 16, 16)
+            }
+            card.addView(TextView(this).apply {
+                text = title
+                textSize = 15f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(red)
+            })
+            if (subtitle.isNotBlank()) card.addView(TextView(this).apply {
+                text = subtitle
+                textSize = 10f
+                setTextColor(muted)
+                setPadding(0, 3, 0, 10)
+            })
+            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
+            return card
+        }
+        fun label(parent: LinearLayout, text: String) {
+            parent.addView(TextView(this).apply {
+                this.text = text.uppercase()
+                textSize = 10f
+                letterSpacing = 0.07f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(muted)
+                setPadding(0, 11, 0, 4)
+            })
+        }
+        fun field(parent: LinearLayout, hintText: String, default: String = "", secret: Boolean = false): EditText {
+            val edit = EditText(this).apply {
+                hint = hintText
+                setText(default)
+                setTextColor(white)
+                setHintTextColor(0xFF647795.toInt())
+                textSize = 14f
+                setSingleLine(true)
+                background = rounded(0xFF08111F.toInt(), 0xFF263B5B.toInt(), 10f)
+                setPadding(12, 2, 12, 2)
+                if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            }
+            parent.addView(edit, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 3 })
+            return edit
+        }
+        fun action(parent: LinearLayout, title: String, primary: Boolean = false, onClick: () -> Unit) {
+            parent.addView(Button(this).apply {
+                text = title
+                isAllCaps = false
+                textSize = 12f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(white)
+                background = rounded(if (primary) 0xFF8F1028.toInt() else 0xFF14243B.toInt(),
+                    if (primary) red else 0xFF29466C.toInt(), 12f)
+                setPadding(12, 4, 12, 4)
+                setOnClickListener { onClick() }
+            }, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 8 })
+        }
+
+        val overview = section("LIVE OVERVIEW", "Live account state and trading engine status")
+        val overviewGrid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun stat(title: String, value: String, valueColor: Int): LinearLayout {
+            val tile = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+                setPadding(11, 10, 8, 10)
+            }
+            tile.addView(TextView(this).apply { text = title; textSize = 9f; setTextColor(muted) })
+            tile.addView(TextView(this).apply {
+                text = value
+                textSize = 13f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(valueColor)
+                setPadding(0, 5, 0, 0)
+            })
+            return tile
+        }
+        overviewGrid.addView(stat("ENGINE", "STANDBY", green), LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = 6 })
+        overviewGrid.addView(stat("CONTRACT", "MULTUP / MULTDOWN", white), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = 6 })
+        overview.addView(overviewGrid)
+        overview.addView(TextView(this).apply {
+            text = "No trade is placed until you connect, select markets, pass the risk checks and start the engine."
+            textSize = 11f
+            setTextColor(muted)
+            setPadding(2, 10, 2, 0)
+        })
+
+        val connection = section("01  /  DERIV CONNECTION", "Credentials stay in encrypted app storage. Never send your PAT in chat.")
+        label(connection, "Personal access token")
+        pat = field(connection, "PAT with trade permission", secret = true)
+        label(connection, "Deriv app ID")
+        appId = field(connection, "App ID")
+        label(connection, "Selected account ID")
+        account = field(connection, "Deriv Options account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }
+        action(connection, "LOAD MY DERIV ACCOUNTS") { loadAccounts() }
         accountSpinner = Spinner(this)
         accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
         accountSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -156,73 +315,102 @@ class MainActivity : AppCompatActivity() {
                 val item = demoAccounts.getOrNull(position) ?: return
                 account.setText(item.optString("account_id"))
                 accountCurrency = item.optString("currency", "USD")
-                balanceView.text = "SELECTED ${accountModeOf(item).uppercase()}: ${item.optString("account_id")} | ${item.optString("balance")} ${accountCurrency}"
+                balanceView.text = "SELECTED \${accountModeOf(item).uppercase()}: \${item.optString("account_id")}  •  \${item.optString("balance")} $accountCurrency"
             }
         }
-        box.addView(accountSpinner)
-        balanceView = TextView(this).apply { text = "DEMO BALANCE: not connected"; setTextColor(0xFF00FF7A.toInt()) }
-        box.addView(balanceView)
-        button("CONNECT SELECTED ACCOUNT MODE") { connect() }
-        button("LOAD MARKETS") { loadMarkets() }
-        label("SELECT MARKET")
+        connection.addView(accountSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 7 })
+        action(connection, "CONNECT SELECTED ACCOUNT", true) { connect() }
+
+        val marketsCard = section("02  /  MARKET SCANNER", "Choose active Deriv symbols. Multiplier availability is checked per market.")
         marketSpinner = Spinner(this)
         marketSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load markets first"))
-        box.addView(marketSpinner)
-        button("SELECT UP TO 20 MARKETS FOR SCANNING") { showMarketPicker() }
+        marketsCard.addView(marketSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 6 })
+        action(marketsCard, "LOAD ACTIVE MARKETS") { loadMarkets() }
+        action(marketsCard, "SELECT UP TO 20 MARKETS") { showMarketPicker() }
+        action(marketsCard, "CHECK MULTUP / MULTDOWN SUPPORT") { checkMarket() }
 
-        label("STAKE (ACCOUNT CURRENCY)")
-        stake = field("1.00", "1.00"); box.addView(stake)
-        label("MULTIPLIER")
-        multiplier = field("10", "10"); box.addView(multiplier)
-        label("TAKE PROFIT (ACCOUNT CURRENCY)")
-        takeProfit = field("2.00", "2.00"); box.addView(takeProfit)
-        label("STOP LOSS (ACCOUNT CURRENCY)")
-        stopLoss = field("1.00", "1.00"); box.addView(stopLoss)
-        label("MAX DAILY LOSS (ACCOUNT CURRENCY)")
-        dailyLoss = field("5.00", "5.00"); box.addView(dailyLoss)
-        label("MAX CONSECUTIVE LOSSES")
-        maxLosses = field("3", "3"); box.addView(maxLosses)
-        label("MAX TRADES PER DAY")
-        maxTrades = field("20", "20"); box.addView(maxTrades)
-        label("COOLDOWN SECONDS")
-        cooldown = field("30", "30"); box.addView(cooldown)
+        val risk = section("03  /  RISK ENGINE", "Set limits before starting. Values are in the account currency unless stated.")
+        label(risk, "Stake per trade")
+        stake = field(risk, "Stake", "1.00")
+        label(risk, "Multiplier")
+        multiplier = field(risk, "Multiplier", "10")
+        label(risk, "Take profit")
+        takeProfit = field(risk, "Take profit", "2.00")
+        label(risk, "Stop loss")
+        stopLoss = field(risk, "Stop loss", "1.00")
+        label(risk, "Maximum daily loss")
+        dailyLoss = field(risk, "Max daily loss", "5.00")
+        label(risk, "Maximum consecutive losses")
+        maxLosses = field(risk, "Maximum consecutive losses", "3")
+        label(risk, "Maximum trades per day")
+        maxTrades = field(risk, "Maximum trades per day", "20")
+        label(risk, "Cooldown between entries (seconds)")
+        cooldown = field(risk, "Cooldown seconds", "30")
 
-        button("CHECK SELECTED MARKET MULTIPLIERS") { checkMarket() }
-        button("START AUTOMATIC SCALPING — SELECTED MODE") { startTrading() }
-        button("EMERGENCY STOP / DISCONNECT") {
+        val execution = section("04  /  EXECUTION", "One open position at a time. Emergency stop prevents new entries.")
+        action(execution, "START AUTOMATIC SCALPING", true) { startTrading() }
+        action(execution, "EMERGENCY STOP / DISCONNECT") {
             reconnectEnabled = false
             mainHandler.removeCallbacks(reconnectRunnable)
             controller?.stop()
             if (controller?.hasOpenPosition() == true) {
-                show("New entries stopped. Existing ${selectedMode.uppercase()} position remains connected and monitored for its exit rules. Keep the app open until it closes.")
+                show("New entries stopped. Existing \${selectedMode.uppercase()} position remains connected and monitored for its exit rules. Keep the app open until it closes.")
             } else {
                 api.disconnect()
                 show("Stopped and disconnected. No open position was being monitored.")
             }
         }
         log = TextView(this).apply {
-            text = "Connect a Deriv account, load markets and select a symbol. Real trading requires verified Demo evidence and explicit approval."
-            textSize = 14f
-            setTextColor(0xFF00FF7A.toInt())
-            setPadding(8, 18, 8, 18)
+            text = "SYSTEM STANDBY  •  Connect your Deriv account to begin."
+            textSize = 12f
+            setTextColor(green)
+            background = rounded(0xFF071A17.toInt(), 0xFF126044.toInt(), 12f)
+            setPadding(12, 12, 12, 12)
         }
-        box.addView(log)
-        box.addView(TextView(this).apply {
-            text = "TRADE HISTORY"
-            textSize = 18f
-            setTextColor(0xFFFF0A1F.toInt())
+        execution.addView(log, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 12 })
+        execution.addView(TextView(this).apply {
+            text = "Real mode remains locked until a genuine closed Demo trade is recorded, local risk self-tests pass and you explicitly approve. Multiplier contracts can lose the full stake."
+            textSize = 10f
+            setTextColor(0xFFFFA0AA.toInt())
+            setPadding(2, 12, 2, 0)
         })
-        historyView = TextView(this).apply { setTextColor(-1); textSize = 12f }
-        box.addView(historyView)
-        box.addView(TextView(this).apply {
-            text = "Real mode requires a closed Demo trade, passing local risk self-tests and explicit approval. Multiplier contracts can lose the full stake."
-            setTextColor(0xFFFF9AA5.toInt())
-            setPadding(0, 16, 0, 10)
-        })
-        scroll.addView(box)
-        setContentView(scroll)
-    }
 
+        val history = section("05  /  TRADE HISTORY", "Most recent recorded contracts")
+        historyView = TextView(this).apply {
+            setTextColor(white)
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(12, 12, 12, 12)
+            background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+        }
+        history.addView(historyView)
+
+        val destinations = listOf("OVERVIEW" to overview, "CONNECT" to connection, "MARKETS" to marketsCard, "RISK" to risk, "HISTORY" to history)
+        destinations.forEach { (title, target) ->
+            nav.addView(Button(this).apply {
+                text = title
+                isAllCaps = false
+                textSize = 10f
+                setTextColor(white)
+                background = rounded(0xFF101D31.toInt(), 0xFF29466C.toInt(), 10f)
+                setPadding(12, 0, 12, 0)
+                setOnClickListener { contentScroll.post { contentScroll.smoothScrollTo(0, target.top) } }
+            }, LinearLayout.LayoutParams(-2, 42).apply { marginEnd = 6 })
+        }
+
+        pat.setText(prefs.getString("pat", ""))
+        appId.setText(prefs.getString("appId", ""))
+        stake.setText(prefs.getString("stake", "1.00"))
+        multiplier.setText(prefs.getString("multiplier", "10"))
+        takeProfit.setText(prefs.getString("takeProfit", "2.00"))
+        stopLoss.setText(prefs.getString("stopLoss", "1.00"))
+        dailyLoss.setText(prefs.getString("dailyLoss", "5.00"))
+        maxLosses.setText(prefs.getString("maxLosses", "3"))
+        maxTrades.setText(prefs.getString("maxTrades", "20"))
+        cooldown.setText(prefs.getString("cooldown", "30"))
+        showHistory()
+        setContentView(root)
+    }
 
     private fun requestRealUnlock() {
         if (realUnlocked) { show("Real mode is already unlocked on this installation."); return }
