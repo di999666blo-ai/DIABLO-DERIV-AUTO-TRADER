@@ -288,8 +288,12 @@ class MainActivity : AppCompatActivity() {
                 setSingleLine(true)
                 background = rounded(0xFF08111F.toInt(), 0xFF263B5B.toInt(), 10f)
                 setPadding(12, 2, 12, 2)
-                if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-                else inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                // Deriv credentials and IDs may contain letters and digits.
+                // Keep every connection field on a text keyboard; mask only the PAT.
+                inputType = if (secret)
+                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                else
+                    android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
             }
             parent.addView(edit, LinearLayout.LayoutParams(-1, 48).apply { bottomMargin = 3 })
             return edit
