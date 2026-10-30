@@ -212,21 +212,21 @@ class TradingController(
         if (!running.get() || openContractId != null || emergencyStop) return
         onStatus("Requesting ${signal.direction} multiplier proposal on $symbol…")
         api.multiplierProposal(symbol, signal.direction.name, config.stake, config.multiplier, currency) { result ->
-            result.onSuccess { response ->
+            result.onSuccess proposalResponse@ { response ->
                 val proposal = response.optJSONObject("proposal")
                 val proposalId = proposal?.optString("id").orEmpty()
                 val askPrice = proposal?.optDouble("ask_price", Double.NaN) ?: Double.NaN
                 if (proposalId.isBlank() || !askPrice.isFinite() || askPrice <= 0.0) {
                     onStatus("$symbol proposal missing a valid ID/ask price; no purchase made.")
-                    return@onSuccess
+                    return@proposalResponse
                 }
                 api.buy(proposalId, askPrice) { buyResult ->
-                    buyResult.onSuccess { bought ->
+                    buyResult.onSuccess buyResponse@ { bought ->
                         val buy = bought.optJSONObject("buy")
                         val id = buy?.optLong("contract_id", 0L) ?: 0L
                         if (id <= 0L) {
                             onStatus("Buy response did not contain a valid contract ID.")
-                            return@onSuccess
+                            return@buyResponse
                         }
                         synchronized(this) {
                             openContractId = id
