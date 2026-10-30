@@ -9,6 +9,7 @@ export class RiskGuard {
   rollover(now = new Date()) { const day=this.dayKey(now); if(day!==this.day){this.day=day;this.reset();} }
   recordTrade({symbol="UNKNOWN"}={}) { this.rollover(); this.trades++; this.lastTradeAt=Date.now(); this.openTrades++; this.openByMarket[symbol]=(this.openByMarket[symbol]||0)+1; return this.currentStake; }
   recordClosedTrade(profit,symbol="UNKNOWN") {
+    this.rollover();
     const p=Number(profit); if(!Number.isFinite(p)) return {recorded:false};
     this.openTrades=Math.max(0,this.openTrades-1); this.openByMarket[symbol]=Math.max(0,(this.openByMarket[symbol]||0)-1);
     if(p<0){this.loss+=Math.abs(p);this.consecutiveLosses++;}
