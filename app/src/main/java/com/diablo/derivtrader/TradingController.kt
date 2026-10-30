@@ -54,7 +54,7 @@ class TradingController(
             multiplier = config.multiplier,
             takeProfit = config.takeProfit,
             stopLoss = config.stopLoss,
-            maxOpenPositions = 1,
+            maxOpenPositions = config.maxOpenPositions,
             dailyLossLimit = config.dailyLossLimit,
             maxConsecutiveLosses = config.maxConsecutiveLosses,
             maxTradesPerDay = config.maxTradesPerDay,
