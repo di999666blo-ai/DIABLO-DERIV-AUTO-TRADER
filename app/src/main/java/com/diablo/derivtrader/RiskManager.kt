@@ -26,7 +26,16 @@ data class RiskDecision(val allowed: Boolean, val reason: String)
 class RiskManager(private val settings: RiskSettings) {
     fun canEnter(state: RiskSnapshot, nowMillis: Long = System.currentTimeMillis()): RiskDecision {
         if (state.emergencyStopped) return RiskDecision(false, "Emergency stop is active")
-        if (settings.stake <= 0.0 || settings.multiplier <= 0) return RiskDecision(false, "Stake and multiplier must be positive")
+        if (!settings.stake.isFinite() || settings.stake <= 0.0 ||
+            settings.multiplier <= 0 ||
+            !settings.takeProfit.isFinite() || settings.takeProfit <= 0.0 ||
+            !settings.stopLoss.isFinite() || settings.stopLoss <= 0.0 ||
+            !settings.dailyLossLimit.isFinite() || settings.dailyLossLimit <= 0.0 ||
+            settings.maxConsecutiveLosses <= 0 || settings.maxTradesPerDay <= 0 ||
+            settings.maxOpenPositions <= 0 || settings.cooldownMillis < 0L) {
+            return RiskDecision(false, "Risk configuration is invalid; trading blocked")
+        }
+        if (!state.realizedPnlToday.isFinite()) return RiskDecision(false, "Daily P/L is invalid; trading blocked")
         if (state.realizedPnlToday <= -settings.dailyLossLimit) return RiskDecision(false, "Daily loss limit reached")
         if (state.consecutiveLosses >= settings.maxConsecutiveLosses) return RiskDecision(false, "Consecutive-loss limit reached")
         if (state.tradesToday >= settings.maxTradesPerDay) return RiskDecision(false, "Daily trade limit reached")
