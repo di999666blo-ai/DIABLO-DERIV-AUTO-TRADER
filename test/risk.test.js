@@ -1,0 +1,4 @@
+import test from "node:test";import assert from "node:assert/strict";import {RiskGuard} from "../src/risk.js";
+test("starts stopped and rejects real mode",()=>{const g=new RiskGuard();g.arm();assert.equal(g.canTrade({stake:1,autoTrade:true,mode:"real"}).ok,false);});
+test("stake cap and emergency stop work",()=>{const g=new RiskGuard({maxStake:2});g.arm();assert.equal(g.canTrade({stake:3,autoTrade:true,mode:"demo"}).ok,false);g.emergencyStop();assert.equal(g.canTrade({stake:1,autoTrade:true,mode:"demo"}).ok,false);});
+test("daily loss limit stops session",()=>{const g=new RiskGuard({dailyLoss:5});g.arm();g.recordClosedTrade(-5);assert.equal(g.stopped,true);});
