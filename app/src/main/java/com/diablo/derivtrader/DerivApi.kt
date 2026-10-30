@@ -47,11 +47,13 @@ class DerivApi {
                         }
                         ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
                             override fun onOpen(webSocket: WebSocket, response: Response) {
+                                if (ws !== webSocket) { webSocket.close(1000, "Superseded connection"); return }
                                 connected = true
                                 connectedMode = mode
                                 done(Result.success("Connected to Deriv ${mode.uppercase()}"))
                             }
                             override fun onMessage(webSocket: WebSocket, text: String) {
+                                if (ws !== webSocket) return
                                 try {
                                     val message = JSONObject(text)
                                     val id = message.optInt("req_id", -1)
@@ -66,11 +68,13 @@ class DerivApi {
                                 } catch (_: Exception) { }
                             }
                             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                                if (ws !== webSocket) return
                                 connected = false
                                 connectedMode = null
                                 if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", "WebSocket closed: $code $reason"))
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                                if (ws !== webSocket) return
                                 connected = false
                                 connectedMode = null
                                 onUpdate?.invoke(JSONObject().put("connection_error", t.message ?: "WebSocket failure"))
