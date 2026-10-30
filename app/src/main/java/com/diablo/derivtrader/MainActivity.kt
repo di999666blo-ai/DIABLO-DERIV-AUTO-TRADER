@@ -839,15 +839,15 @@ class MainActivity : AppCompatActivity() {
                 portfolioResult.onSuccess { response ->
                     val contracts = response.optJSONObject("portfolio")?.optJSONArray("contracts")
                     val openCount = contracts?.length() ?: 0
-                    if (openCount > 0) {
-                        show("Safety lock: Deriv reports $openCount open contract(s). Manage or close them in Deriv first; scanner will not add exposure.")
-                        return@onSuccess
-                    }
                     controller = TradingController(api, config, { status ->
                         runOnUiThread { show(status) }
                     }, { record ->
                         runOnUiThread { saveTrade(record) }
                     })
+                    if (openCount > 0) {
+                        show("Restoring $openCount existing Deriv contract(s) before scanning. No duplicate positions will be opened.")
+                        controller?.adoptOpenPositions(contracts ?: JSONArray())
+                    }
                     controller?.start(selected, accountCurrency)
                 }.onFailure { show("Could not verify open positions. Scanner blocked for safety: ${it.message}") }
             }
@@ -932,6 +932,7 @@ class MainActivity : AppCompatActivity() {
         mainHandler.removeCallbacks(reconnectRunnable)
         super.onStop()
         controller?.stop()
-        api.disconnect()
+        // Do not sever the Deriv socket while contracts are open; their monitor streams must remain alive.
+        if (controller?.hasOpenPosition() != true) api.disconnect()
     }
 }
