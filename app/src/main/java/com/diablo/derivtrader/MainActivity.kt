@@ -34,6 +34,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var log: TextView
     private lateinit var balanceView: TextView
     private lateinit var historyView: TextView
+    private var connectionStatusView: TextView? = null
+    private var marketStatusView: TextView? = null
     private var controller: TradingController? = null
     private val markets = mutableListOf<Pair<String, String>>()
     private val selectedMarkets = linkedSetOf<String>()
@@ -307,6 +309,13 @@ class MainActivity : AppCompatActivity() {
         label(connection, "Selected account ID")
         account = field(connection, "Deriv Options account ID").apply { inputType = android.text.InputType.TYPE_CLASS_TEXT }
         action(connection, "LOAD MY DERIV ACCOUNTS") { loadAccounts() }
+        connectionStatusView = TextView(this).apply {
+            text = "Ready. Tap LOAD MY DERIV ACCOUNTS to retrieve accounts."
+            textSize = 11f
+            setTextColor(green)
+            setPadding(4, 9, 4, 4)
+        }
+        connection.addView(connectionStatusView)
         accountSpinner = Spinner(this)
         accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
         accountSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
@@ -320,6 +329,7 @@ class MainActivity : AppCompatActivity() {
         }
         connection.addView(accountSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 7 })
         action(connection, "CONNECT SELECTED ACCOUNT", true) { connect() }
+        connectionStatusView?.text = "Ready. Load accounts, select the correct account, then connect."
 
         val marketsCard = section("02  /  MARKET SCANNER", "Choose active Deriv symbols. Multiplier availability is checked per market.")
         marketSpinner = Spinner(this)
@@ -328,6 +338,13 @@ class MainActivity : AppCompatActivity() {
         action(marketsCard, "LOAD ACTIVE MARKETS") { loadMarkets() }
         action(marketsCard, "SELECT UP TO 20 MARKETS") { showMarketPicker() }
         action(marketsCard, "CHECK MULTUP / MULTDOWN SUPPORT") { checkMarket() }
+        marketStatusView = TextView(this).apply {
+            text = "Markets not loaded yet."
+            textSize = 11f
+            setTextColor(muted)
+            setPadding(4, 9, 4, 4)
+        }
+        marketsCard.addView(marketStatusView)
 
         val risk = section("03  /  RISK ENGINE", "Set limits before starting. Values are in the account currency unless stated.")
         label(risk, "Stake per trade")
@@ -468,28 +485,28 @@ class MainActivity : AppCompatActivity() {
         val token = pat.text.toString().trim()
         val id = appId.text.toString().trim()
         if (token.isBlank() || id.isBlank()) {
-            show("Enter PAT and App ID first.")
+            showConnectionStatus("Enter your Deriv Personal Access Token and App ID first.")
             return
         }
-        show("Loading your Deriv accounts…")
+        showConnectionStatus("⏳ Contacting Deriv and loading your accounts…")
         api.getAccounts(token, id) { result ->
             runOnUiThread {
                 result.onSuccess { response ->
                     demoAccounts.clear()
-                    val data = response.optJSONArray("data")
+                    val data = response.optJSONArray("data") ?: response.optJSONArray("accounts")
                     if (data != null) {
                         for (i in 0 until data.length()) {
                             val item = data.optJSONObject(i) ?: continue
                             if (item.optString("account_id").isNotBlank()) demoAccounts.add(item)
                         }
                     } else {
-                        val single = response.optJSONObject("data")
+                        val single = response.optJSONObject("data") ?: response.optJSONObject("account")
                         if (single != null && single.optString("account_id").isNotBlank()) demoAccounts.add(single)
                     }
                     accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
                         demoAccounts.map { "${accountModeOf(it)} | ${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
-                    show("Found ${demoAccounts.size} account(s). Select the account matching your chosen mode.")
-                }.onFailure { show("Account discovery failed: ${it.message}") }
+                    showConnectionStatus(if (demoAccounts.isEmpty()) "Deriv responded, but no account records were found. Check that this PAT belongs to the expected Deriv account." else "✅ Found ${demoAccounts.size} account(s). Select the account matching DEMO mode.")
+                }.onFailure { showConnectionStatus("❌ Account discovery failed: ${it.message}") }
             }
         }
     }
@@ -510,13 +527,13 @@ class MainActivity : AppCompatActivity() {
         reconnectEnabled = selectedMode == "demo"
         reconnectAttempts = 0
         prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).putString("accountMode", selectedMode).apply()
-        show("Requesting Deriv ${selectedMode.uppercase()} connection…")
+        showConnectionStatus("⏳ Requesting authenticated Deriv ${selectedMode.uppercase()} connection…")
         api.connect(token, id, accountId, selectedMode) { result ->
             runOnUiThread {
                 result.onSuccess {
                     reconnectAttempts = 0
                     mainHandler.removeCallbacks(reconnectRunnable)
-                    show(it)
+                    showConnectionStatus("✅ $it")
                     balanceView.text = "CONNECTED TO ${selectedMode.uppercase()} ACCOUNT: $accountId"
                     api.balance { balanceResult ->
                         runOnUiThread {
@@ -526,11 +543,11 @@ class MainActivity : AppCompatActivity() {
                                     accountCurrency = b.optString("currency", accountCurrency)
                                     balanceView.text = "${selectedMode.uppercase()} BALANCE: ${b.optDouble("balance")} $accountCurrency"
                                 }
-                            }.onFailure { show("Balance request failed: ${it.message}") }
+                            }.onFailure { showConnectionStatus("Connected, but balance request failed: ${it.message}") }
                         }
                     }
-                    show("Authenticated Deriv ${selectedMode.uppercase()} WebSocket connected. Load markets.")
-                }.onFailure { show("Connection failed: ${it.message}") }
+                    showConnectionStatus("✅ Authenticated Deriv ${selectedMode.uppercase()} WebSocket connected. Load markets next.")
+                }.onFailure { showConnectionStatus("❌ Connection failed: ${it.message}") }
             }
         }
     }
@@ -585,6 +602,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadMarkets() {
+        if (!api.connected) {
+            showMarketStatus("Connect your Deriv account before loading its active markets.")
+            return
+        }
+        showMarketStatus("⏳ Requesting active markets from Deriv…")
         api.markets { result ->
             runOnUiThread {
                 result.onSuccess { response ->
@@ -599,8 +621,8 @@ class MainActivity : AppCompatActivity() {
                     val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
                         markets.map { "${it.first} (${it.second})" })
                     marketSpinner.adapter = adapter
-                    show("Loaded ${markets.size} active markets. Multiplier support is checked separately per symbol.")
-                }.onFailure { show("Market load failed: ${it.message}") }
+                    showMarketStatus(if (markets.isEmpty()) "Deriv returned no active markets for this account." else "✅ Loaded ${markets.size} active markets. Select one, then check multiplier support.")
+                }.onFailure { showMarketStatus("❌ Market load failed: ${it.message}") }
             }
         }
     }
@@ -775,6 +797,16 @@ class MainActivity : AppCompatActivity() {
             "#${item.optLong("id")} ${item.optString("symbol")} ${item.optString("direction")} | ${item.optString("status")} | Entry ${item.optDouble("buyPrice")} | Exit ${item.optDouble("exitPrice")} | P/L ${item.optDouble("profit")}"
         }
         historyView.text = lines.reversed().joinToString("\n").ifBlank { "No trades recorded yet." }
+    }
+
+    private fun showConnectionStatus(message: String) {
+        if (::log.isInitialized) log.text = message
+        connectionStatusView?.text = message
+    }
+
+    private fun showMarketStatus(message: String) {
+        if (::log.isInitialized) log.text = message
+        marketStatusView?.text = message
     }
 
     private fun show(message: String) {
