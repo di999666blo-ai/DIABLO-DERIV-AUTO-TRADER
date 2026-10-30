@@ -188,7 +188,8 @@ class TradingController(
             onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | ${signal.reason}")
             if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
             if (!running.get() || symbol in pendingSymbols || positions.values.any { it.symbol == symbol }) return
-            val pairLimit = config.marketTradeLimits[symbol] ?: config.maxTradesPerMarket\n            if (pairLimit !in 1..100 || (marketTradeCounts[symbol] ?: 0) >= pairLimit) {
+            val pairLimit = config.marketTradeLimits[symbol] ?: config.maxTradesPerMarket
+            if (pairLimit !in 1..100 || (marketTradeCounts[symbol] ?: 0) >= pairLimit) {
                 onStatus("$symbol per-market trade quantity limit reached."); return
             }
             val decision = risk.canEnter(RiskSnapshot(
