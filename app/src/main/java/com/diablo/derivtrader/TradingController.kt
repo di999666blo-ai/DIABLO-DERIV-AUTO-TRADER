@@ -66,6 +66,7 @@ class TradingController(
     private var tradesToday = config.initialTradesToday
     private var openContractId: Long? = null
     private var openContractSymbol = ""
+    private var openContractSubscriptionId: String? = null
     private var closeRequestSent = false
     private var emergencyStop = false
     private var watchdog: ScheduledExecutorService? = null
@@ -237,6 +238,9 @@ class TradingController(
                         onTrade(TradeRecord(id, symbol, signal.direction.name, askPrice, 0.0, "OPEN", signal.reason))
                         onStatus("Demo contract opened: $id on $symbol. Monitoring live P/L.")
                         api.monitor(id) { monitorResult ->
+                            monitorResult.onSuccess { monitorResponse ->
+                                openContractSubscriptionId = monitorResponse.optJSONObject("subscription")?.optString("id")
+                            }
                             monitorResult.onFailure {
                                 onStatus("Contract monitor failed for open contract $id: ${it.message}. Scanner is stopping; inspect this position directly in Deriv.")
                                 stop()
@@ -271,6 +275,8 @@ class TradingController(
                 realizedPnl += profit
                 consecutiveLosses = if (profit < 0.0) consecutiveLosses + 1 else 0
                 openContractId = null
+                openContractSubscriptionId?.let { subscription -> api.unsubscribe(subscription) { } }
+                openContractSubscriptionId = null
                 closeRequestSent = false
                 onTrade(TradeRecord(id, openContractSymbol, if (contract.optString("contract_type") == "MULTUP") "UP" else if (contract.optString("contract_type") == "MULTDOWN") "DOWN" else contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
                 onStatus("Contract $id closed. P/L $profit | Session P/L $realizedPnl")
@@ -292,6 +298,9 @@ class TradingController(
         subscriptions.clear()
         onStatus("Scanner stopped. No new entries will be opened.")
     }
+
+    @Synchronized
+    fun hasOpenPosition(): Boolean = openContractId != null
 
     fun isRunning(): Boolean = running.get()
 }
