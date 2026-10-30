@@ -19,6 +19,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var account: EditText
     private lateinit var accountSpinner: Spinner
     private val demoAccounts = mutableListOf<JSONObject>()
+    private lateinit var modeSpinner: Spinner
+    private var selectedMode = "demo"
+    private var realUnlocked = false
     private lateinit var marketSpinner: Spinner
     private lateinit var stake: EditText
     private lateinit var multiplier: EditText
@@ -54,6 +57,7 @@ class MainActivity : AppCompatActivity() {
             finish()
             return
         }
+        realUnlocked = prefs.getBoolean("real_unlocked", false)
         render()
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
@@ -122,6 +126,18 @@ class MainActivity : AppCompatActivity() {
             setTextColor(0xFFFF0A1F.toInt())
             setPadding(0, 8, 0, 16)
         })
+        label("ACCOUNT MODE")
+        modeSpinner = Spinner(this)
+        modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, if (realUnlocked) listOf("DEMO", "REAL — UNLOCKED") else listOf("DEMO", "REAL — LOCKED"))
+        modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position == 1 && !realUnlocked) { Toast.makeText(this@MainActivity, "Real mode locked until Demo verification and explicit approval.", Toast.LENGTH_LONG).show(); modeSpinner.setSelection(0); selectedMode = "demo" }
+                else selectedMode = if (position == 1) "real" else "demo"
+            }
+        }
+        box.addView(modeSpinner)
+        button("REVIEW DEMO VERIFICATION & UNLOCK REAL") { requestRealUnlock() }
         label("DERIV PERSONAL ACCESS TOKEN")
         pat = field("PAT with trade permission", secret = true); box.addView(pat)
         label("DERIV APP ID")
@@ -205,6 +221,23 @@ class MainActivity : AppCompatActivity() {
     }
 
 
+    private fun requestRealUnlock() {
+        if (realUnlocked) { show("Real mode is already unlocked on this installation."); return }
+        val checks = arrayOf("I completed a successful Demo MULTUP or MULTDOWN buy and close.", "I confirmed the closed trade appears in Deriv and app history.", "I tested take-profit, stop-loss, daily-loss and emergency-stop behavior.", "I understand a multiplier trade can lose the full stake and Real mode uses real funds.")
+        val selected = BooleanArray(checks.size)
+        android.app.AlertDialog.Builder(this).setTitle("Demo verification and Real trading approval")
+            .setMultiChoiceItems(checks, selected) { _, which, checked -> selected[which] = checked }
+            .setPositiveButton("I EXPLICITLY APPROVE REAL MODE") { _, _ ->
+                if (!selected.all { it }) show("Unlock refused: complete every Demo verification and acknowledgement.")
+                else {
+                    realUnlocked = true
+                    prefs.edit().putBoolean("real_unlocked", true).apply()
+                    modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("DEMO", "REAL — UNLOCKED"))
+                    show("Real mode unlocked. Select a Real account to connect; trading does not start automatically.")
+                }
+            }.setNegativeButton("KEEP LOCKED", null).show()
+    }
+
     private fun loadAccounts() {
         val token = pat.text.toString().trim()
         val id = appId.text.toString().trim()
@@ -221,16 +254,15 @@ class MainActivity : AppCompatActivity() {
                     if (data != null) {
                         for (i in 0 until data.length()) {
                             val item = data.optJSONObject(i) ?: continue
-                            if (item.optString("account_type").equals("demo", true) ||
-                                item.optString("group").equals("demo", true)) demoAccounts.add(item)
+                            if (item.optString("account_id").isNotBlank()) demoAccounts.add(item)
                         }
                     } else {
                         val single = response.optJSONObject("data")
-                        if (single != null && single.optString("account_type").equals("demo", true)) demoAccounts.add(single)
+                        if (single != null && single.optString("account_id").isNotBlank()) demoAccounts.add(single)
                     }
                     accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
                         demoAccounts.map { "${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
-                    show("Found ${demoAccounts.size} Demo account(s). Select one, then connect.")
+                    show("Found ${demoAccounts.size} account(s). Select the account matching your chosen mode.")
                 }.onFailure { show("Account discovery failed: ${it.message}") }
             }
         }
@@ -244,11 +276,12 @@ class MainActivity : AppCompatActivity() {
             show("Enter PAT, App ID and Demo account ID.")
             return
         }
+        if (selectedMode == "real" && !realUnlocked) { show("Real mode is locked until Demo verification and explicit approval."); return }
         reconnectEnabled = true
         reconnectAttempts = 0
-        prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).apply()
-        show("Requesting Deriv Demo connection…")
-        api.connect(token, id, accountId, "demo") { result ->
+        prefs.edit().putString("pat", token).putString("appId", id).putString("accountId", accountId).putString("accountMode", selectedMode).apply()
+        show("Requesting Deriv ${selectedMode.uppercase()} connection…")
+        api.connect(token, id, accountId, selectedMode) { result ->
             runOnUiThread {
                 result.onSuccess {
                     reconnectAttempts = 0
@@ -399,7 +432,8 @@ class MainActivity : AppCompatActivity() {
             show("Stake, multiplier, take profit and stop loss must all be greater than zero.")
             return
         }
-        if (!api.connected) { show("Connect Deriv Demo first."); return }
+        if (!api.connected) { show("Connect the selected Deriv account first."); return }
+        if (selectedMode == "real" && !realUnlocked) { show("Real trading safety gate is locked."); return }
         prefs.edit()
             .putString("stake", stake.text.toString())
             .putString("multiplier", multiplier.text.toString())
