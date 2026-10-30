@@ -1,6 +1,7 @@
 package com.diablo.derivtrader
 
 import org.json.JSONObject
+import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -321,6 +322,29 @@ class TradingController(
         subscriptions.clear()
         // Keep contract subscriptions alive: existing exposure must remain monitored until settled.
         onStatus("Scanner stopped. No new entries; monitoring ${positions.size} existing contract(s).")
+    }
+
+    /** Re-adopts existing portfolio contracts after app restart; never opens a replacement trade. */
+    @Synchronized fun adoptOpenPositions(contracts: JSONArray) {
+        for (index in 0 until contracts.length()) {
+            val item = contracts.optJSONObject(index) ?: continue
+            val id = item.optLong("contract_id", 0L)
+            if (id <= 0L || positions.containsKey(id)) continue
+            val rawSymbol = item.optString("underlying", item.optString("symbol", ""))
+            val symbol = rawSymbol.ifBlank { "RECOVERED-$id" }
+            val type = item.optString("contract_type")
+            val direction = if (type == "MULTDOWN") "DOWN" else "UP"
+            positions[id] = OpenPosition(id, symbol, direction, item.optDouble("buy_price", 0.0))
+            api.monitor(id) { result ->
+                result.onSuccess { response ->
+                    val sub = response.optJSONObject("subscription")?.optString("id")
+                    synchronized(this) { positions[id]?.subscriptionId = sub }
+                }.onFailure {
+                    onStatus("Could not restore monitoring for contract $id: ${it.message}. Keep this position open in Deriv and reconnect.")
+                }
+            }
+        }
+        if (positions.isNotEmpty()) onStatus("Recovered ${positions.size} existing Deriv contract(s); monitoring each independently.")
     }
 
     @Synchronized fun hasOpenPosition(): Boolean = positions.isNotEmpty()
