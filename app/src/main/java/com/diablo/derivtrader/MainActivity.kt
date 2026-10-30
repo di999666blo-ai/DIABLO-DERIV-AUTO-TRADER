@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private var controller: TradingController? = null
     private val markets = mutableListOf<Pair<String, String>>()
     private val selectedMarkets = linkedSetOf<String>()
+    private val marketQuantities = linkedMapOf<String, Int>()
     private var accountCurrency = "USD"
     private val mainHandler = Handler(Looper.getMainLooper())
     private var reconnectAttempts = 0
@@ -86,6 +87,8 @@ class MainActivity : AppCompatActivity() {
         maxPositions.setText(prefs.getString("maxPositions", "3"))
         perMarketLimit.setText(prefs.getString("perMarketLimit", "5"))
         progressionSwitch.isChecked = prefs.getBoolean("stakeProgressionEnabled", false)
+        val savedQuantities = try { JSONObject(prefs.getString("market_quantities", "{}") ?: "{}") } catch (_: Exception) { JSONObject() }
+        savedQuantities.keys().forEach { key -> marketQuantities[key] = savedQuantities.optInt(key, 5).coerceIn(1, 100) }
         showHistory()
         api.onUpdate = { message ->
             runOnUiThread {
@@ -376,6 +379,7 @@ class MainActivity : AppCompatActivity() {
         marketsCard.addView(marketSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 6 })
         action(marketsCard, "LOAD ACTIVE MARKETS") { loadMarkets() }
         action(marketsCard, "SELECT UP TO 20 MARKETS") { showMarketPicker() }
+        action(marketsCard, "SET INDIVIDUAL MARKET QUANTITIES") { showMarketQuantityDialog() }
         action(marketsCard, "CHECK MULTUP / MULTDOWN SUPPORT") { checkMarket() }
         marketStatusView = TextView(this).apply {
             text = "Markets not loaded yet."
@@ -715,6 +719,51 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+
+    private fun showMarketQuantityDialog() {
+        val selected = selectedMarkets.toList().ifEmpty { listOfNotNull(selectedSymbol()) }
+        if (selected.isEmpty()) { show("Select markets first."); return }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(20, 8, 20, 8)
+        }
+        val inputs = linkedMapOf<String, EditText>()
+        selected.forEach { symbol ->
+            panel.addView(TextView(this).apply {
+                text = symbol
+                setTextColor(0xFFF4F7FF.toInt())
+                textSize = 13f
+                setPadding(0, 8, 0, 2)
+            })
+            inputs[symbol] = EditText(this).apply {
+                setText((marketQuantities[symbol] ?: 5).toString())
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setTextColor(0xFFF4F7FF.toInt())
+                hint = "1–100 trades"
+            }
+            panel.addView(inputs[symbol], LinearLayout.LayoutParams(-1, 48))
+        }
+        val scroll = ScrollView(this).apply { addView(panel) }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("PER-MARKET QUANTITY")
+            .setMessage("Set an independent maximum number of entries per market for this run.")
+            .setView(scroll)
+            .setPositiveButton("SAVE") { _, _ ->
+                val parsed = inputs.mapValues { it.value.text.toString().toIntOrNull() ?: 0 }
+                if (parsed.values.any { it !in 1..100 }) {
+                    show("Every market quantity must be between 1 and 100. Nothing saved.")
+                } else {
+                    marketQuantities.putAll(parsed)
+                    val saved = JSONObject()
+                    marketQuantities.forEach { (key, value) -> saved.put(key, value) }
+                    prefs.edit().putString("market_quantities", saved.toString()).apply()
+                    show("Individual market quantities saved.")
+                }
+            }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
     private fun checkMarket() {
         val selected = selectedSymbol() ?: run { show("Load and select a market first."); return }
         api.contractsFor(selected) { result ->
@@ -781,7 +830,8 @@ class MainActivity : AppCompatActivity() {
             initialTradesToday = dailyStats.third,
             maxOpenPositions = positionLimit,
             maxTradesPerMarket = marketLimit,
-            stakeProgressionEnabled = progressionSwitch.isChecked
+            stakeProgressionEnabled = progressionSwitch.isChecked,
+            marketTradeLimits = selected.associateWith { marketQuantities[it] ?: marketLimit }
         )
         show("Checking Deriv for existing open positions before starting…")
         api.portfolio { portfolioResult ->
