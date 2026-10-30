@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
 
 class DerivApi {
     private val http = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build()
+    private val publicHttp = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
     private var ws: WebSocket? = null
     private var reqId = 1
     private val pending = mutableMapOf<Int, (Result<JSONObject>) -> Unit>()
@@ -167,8 +168,72 @@ class DerivApi {
     fun balance(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("balance", 1).put("subscribe", 1), done)
 
-    fun markets(done: (Result<JSONObject>) -> Unit) =
-        request(JSONObject().put("active_symbols", "brief"), done)
+    /**
+     * Active symbols are public market data. Deriv documents this request on its
+     * unauthenticated public Options WebSocket, not as an account-scoped lookup.
+     * Fetch the catalogue there, then use the authenticated account socket for
+     * contracts, proposals, buys and open-contract monitoring.
+     */
+    fun markets(done: (Result<JSONObject>) -> Unit) {
+        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+        fun finish(result: Result<JSONObject>) {
+            if (finished.compareAndSet(false, true)) done(result)
+        }
+        val publicSocket = publicHttp.newWebSocket(
+            Request.Builder()
+                .url("wss://api.derivws.com/trading/v1/options/ws/public")
+                .build(),
+            object : WebSocketListener() {
+                override fun onOpen(webSocket: WebSocket, response: Response) {
+                    if (!webSocket.send(JSONObject()
+                            .put("active_symbols", "brief")
+                            .put("req_id", 71001)
+                            .toString())) {
+                        finish(Result.failure(Exception("Could not request Deriv public market list.")))
+                        webSocket.close(1000, "Request failed")
+                    }
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    try {
+                        val message = JSONObject(text)
+                        if (message.optInt("req_id", -1) != 71001 &&
+                            !message.has("active_symbols") && !message.has("error") && !message.has("errors")) return
+                        when {
+                            message.has("error") -> finish(Result.failure(Exception(
+                                message.optJSONObject("error")?.optString("message") ?: "Deriv public market request failed"
+                            )))
+                            message.optJSONArray("errors")?.length()?.let { it > 0 } == true -> {
+                                val errors = message.optJSONArray("errors")!!
+                                val details = (0 until errors.length()).mapNotNull { i ->
+                                    errors.optJSONObject(i)?.optString("message")?.takeIf { it.isNotBlank() }
+                                }.joinToString("; ")
+                                finish(Result.failure(Exception(details.ifBlank { "Deriv rejected the public market request" })))
+                            }
+                            message.optJSONArray("active_symbols") != null ->
+                                finish(Result.success(message))
+                            else -> finish(Result.failure(Exception("Deriv response did not contain an active_symbols list: $text")))
+                        }
+                    } catch (e: Exception) {
+                        finish(Result.failure(e))
+                    } finally {
+                        webSocket.close(1000, "Market list received")
+                    }
+                }
+
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    val code = response?.let { " (HTTP ${it.code})" }.orEmpty()
+                    finish(Result.failure(Exception("Public market feed failed$code: ${t.message ?: "network error"}")))
+                }
+
+                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                    if (!finished.get()) finish(Result.failure(Exception(
+                        "Public market feed closed before returning symbols: $code ${reason}"
+                    )))
+                }
+            }
+        )
+    }
 
     fun contractsFor(symbol: String, done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("contracts_for", symbol), done)
