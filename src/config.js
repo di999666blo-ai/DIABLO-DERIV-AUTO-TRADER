@@ -12,6 +12,7 @@ export const config = Object.freeze({
   liveTradingAck: process.env.LIVE_TRADING_ACK === "I_ACCEPT_REAL_MONEY_RISK",
   autoAccountId: process.env.AUTO_ACCOUNT_ID || "",
   autoMarkets: (process.env.AUTO_MARKETS || "").split(",").map(x=>x.trim()).filter(Boolean),
+  autoCurrency: (process.env.AUTO_CURRENCY || "USD").toUpperCase(),
   autoGranularity: Math.trunc(num("AUTO_GRANULARITY", 60)),
   autoDuration: Math.trunc(num("AUTO_DURATION", 1)),
   autoDurationUnit: process.env.AUTO_DURATION_UNIT || "m",
