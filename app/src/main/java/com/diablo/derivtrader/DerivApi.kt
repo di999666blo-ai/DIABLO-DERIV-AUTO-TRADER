@@ -195,10 +195,14 @@ class DerivApi {
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    val message = try { JSONObject(text) } catch (e: Exception) {
+                        finish(Result.failure(e))
+                        webSocket.close(1000, "Invalid market response")
+                        return
+                    }
+                    if (message.optInt("req_id", -1) != 71001 &&
+                        !message.has("active_symbols") && !message.has("error") && !message.has("errors")) return
                     try {
-                        val message = JSONObject(text)
-                        if (message.optInt("req_id", -1) != 71001 &&
-                            !message.has("active_symbols") && !message.has("error") && !message.has("errors")) return
                         when {
                             message.has("error") -> finish(Result.failure(Exception(
                                 message.optJSONObject("error")?.optString("message") ?: "Deriv public market request failed"
@@ -216,9 +220,8 @@ class DerivApi {
                         }
                     } catch (e: Exception) {
                         finish(Result.failure(e))
-                    } finally {
-                        webSocket.close(1000, "Market list received")
                     }
+                    webSocket.close(1000, "Market list received")
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
