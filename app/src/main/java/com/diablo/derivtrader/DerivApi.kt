@@ -151,6 +151,8 @@ class DerivApi {
         stake: Double,
         multiplier: Int,
         currency: String,
+        takeProfit: Double,
+        stopLoss: Double,
         done: (Result<JSONObject>) -> Unit
     ) {
         require(direction == "UP" || direction == "DOWN")
@@ -162,6 +164,9 @@ class DerivApi {
                 .put("contract_type", if (direction == "UP") "MULTUP" else "MULTDOWN")
                 .put("currency", currency)
                 .put("multiplier", multiplier)
+                .put("limit_order", JSONObject()
+                    .put("take_profit", takeProfit)
+                    .put("stop_loss", stopLoss))
                 .put("underlying_symbol", symbol),
             done
         )
