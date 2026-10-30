@@ -15,7 +15,7 @@ class TickCandleBuilder(private val intervalSeconds: Long) {
 
     @Synchronized
     fun onTick(tick: MarketTick): MarketCandle? {
-        if (!tick.quote.isFinite() || tick.quote <= 0.0 || tick.epochSeconds <= lastTickEpoch) return null
+        if (!tick.quote.isFinite() || tick.quote <= 0.0 || tick.epochSeconds < lastTickEpoch) return null
         lastTickEpoch = tick.epochSeconds
         val bucket = (tick.epochSeconds / intervalSeconds) * intervalSeconds
         val current = bucketStart
