@@ -79,8 +79,8 @@ class TradingController(
 
     @Synchronized
     fun start(selectedSymbols: List<String>, accountCurrency: String = config.currency) {
-        if (!api.connected) {
-            onStatus("Connect Deriv Demo before starting the scanner.")
+        if (!api.connected || api.connectedMode != "demo") {
+            onStatus("Safety lock: connect a verified Deriv Demo account before starting automated trading.")
             return
         }
         if (running.get()) {
