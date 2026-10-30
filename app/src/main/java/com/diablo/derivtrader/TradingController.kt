@@ -61,6 +61,7 @@ class TradingController(
     private var consecutiveLosses = 0
     private var tradesToday = 0
     private var openContractId: Long? = null
+    private var closeRequestSent = false
     private var emergencyStop = false
     private val seenSignals = HashSet<Long>()
 
@@ -173,6 +174,7 @@ class TradingController(
                         }
                         synchronized(this) {
                             openContractId = id
+                            closeRequestSent = false
                             lastEntryMillis = System.currentTimeMillis()
                             tradesToday++
                         }
@@ -195,17 +197,22 @@ class TradingController(
             val isSold = contract.optBoolean("is_sold", false)
             val isExpired = contract.optBoolean("is_expired", false)
             val exitReason = risk.exitReason(profit)
-            if (!isSold && !isExpired && exitReason != null) {
+            if (!isSold && !isExpired && exitReason != null && !closeRequestSent) {
+                closeRequestSent = true
                 onStatus("$exitReason. Sending close request for $id…")
                 api.sell(id) { sellResult ->
                     sellResult.onSuccess { onStatus("Close request accepted for $id.") }
-                        .onFailure { onStatus("Close request failed: ${it.message}. Position remains open and monitored.") }
+                        .onFailure {
+                            synchronized(this) { closeRequestSent = false }
+                            onStatus("Close request failed: ${it.message}. Position remains open and monitored.")
+                        }
                 }
             }
             if (isSold || isExpired) {
                 realizedPnl += profit
                 consecutiveLosses = if (profit < 0.0) consecutiveLosses + 1 else 0
                 openContractId = null
+                closeRequestSent = false
                 onTrade(TradeRecord(id, symbol, contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
                 onStatus("Contract $id closed. P/L $profit | Daily P/L $realizedPnl")
                 if (realizedPnl <= -config.dailyLossLimit || consecutiveLosses >= config.maxConsecutiveLosses) {
