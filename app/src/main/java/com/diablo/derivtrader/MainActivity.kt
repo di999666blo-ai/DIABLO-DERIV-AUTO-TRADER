@@ -451,7 +451,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!api.connected) { show("Connect the selected Deriv account first."); return }
-        if (selectedMode != "demo" || accountModeOfId(prefs.getString("accountId", "").orEmpty()) != "demo") { show("Safety lock: this build permits automated trading only on a detected Demo account."); return }
+        if (selectedMode != "demo" || prefs.getString("accountMode", "demo") != "demo" || api.connectedMode != "demo") { show("Safety lock: this build permits automated trading only on a verified Demo connection."); return }
         prefs.edit()
             .putString("stake", stake.text.toString())
             .putString("multiplier", multiplier.text.toString())
