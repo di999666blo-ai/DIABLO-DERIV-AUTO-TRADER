@@ -27,6 +27,7 @@ data class TradeRecord(
     val symbol: String,
     val direction: String,
     val buyPrice: Double,
+    val exitPrice: Double,
     val profit: Double,
     val status: String,
     val detail: String
@@ -235,7 +236,7 @@ class TradingController(
                             lastEntryMillis = System.currentTimeMillis()
                             tradesToday++
                         }
-                        onTrade(TradeRecord(id, symbol, signal.direction.name, askPrice, 0.0, "OPEN", signal.reason))
+                        onTrade(TradeRecord(id, symbol, signal.direction.name, askPrice, 0.0, 0.0, "OPEN", signal.reason))
                         onStatus("Demo contract opened: $id on $symbol. Monitoring live P/L.")
                         api.monitor(id) { monitorResult ->
                             monitorResult.onSuccess { monitorResponse ->
@@ -278,7 +279,7 @@ class TradingController(
                 openContractSubscriptionId?.let { subscription -> api.unsubscribe(subscription) { } }
                 openContractSubscriptionId = null
                 closeRequestSent = false
-                onTrade(TradeRecord(id, openContractSymbol, if (contract.optString("contract_type") == "MULTUP") "UP" else if (contract.optString("contract_type") == "MULTDOWN") "DOWN" else contract.optString("contract_type"), contract.optDouble("buy_price"), profit, "CLOSED", contract.optString("status")))
+                onTrade(TradeRecord(id, openContractSymbol, if (contract.optString("contract_type") == "MULTUP") "UP" else if (contract.optString("contract_type") == "MULTDOWN") "DOWN" else contract.optString("contract_type"), contract.optDouble("buy_price"), contract.optDouble("sell_price", contract.optDouble("bid_price", 0.0)), profit, "CLOSED", contract.optString("status")))
                 onStatus("Contract $id closed. P/L $profit | Session P/L $realizedPnl")
                 if (realizedPnl <= -config.dailyLossLimit || consecutiveLosses >= config.maxConsecutiveLosses || tradesToday >= config.maxTradesPerDay) {
                     onStatus("Risk lock activated. Scanner stopped.")
