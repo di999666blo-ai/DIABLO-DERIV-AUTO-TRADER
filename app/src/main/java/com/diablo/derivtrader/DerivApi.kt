@@ -121,6 +121,9 @@ class DerivApi {
         })
     }
 
+    fun portfolio(done: (Result<JSONObject>) -> Unit) =
+        request(JSONObject().put("portfolio", 1), done)
+
     fun balance(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("balance", 1).put("subscribe", 1), done)
 
