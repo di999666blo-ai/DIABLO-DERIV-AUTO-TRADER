@@ -18,21 +18,26 @@ This native APK is Deriv-only and separate from Diablo Scanner, the Telegram bot
 14. Demo end-to-end tests: auth, market discovery, multiplier availability, proposal, buy, monitor, sell, settlement, reconnect and risk stops.
 15. Real-money execution only after all Demo checks pass and explicit user approval.
 
-## Current source status (not equivalent to verified functionality)
+## Source implementation status (not equivalent to verified functionality)
 - [x] Android Kotlin/Gradle project scaffold, minSdk 26.
-- [x] PAT/App ID entry with encrypted-preferences storage attempt.
+- [x] PAT/App ID entry with encrypted-preferences storage; app now fails closed if encryption cannot initialize (no plaintext fallback).
 - [x] Deriv OTP authenticated WebSocket connection path (response schema still needs live verification).
 - [x] Market-list and contracts_for request primitives.
 - [x] MULTUP/MULTDOWN proposal, buy, monitor and sell request primitives.
+- [x] Live tick subscription request primitive.
+- [x] Closed-candle EMA/RSI/momentum signal engine (setup strength is not a win probability).
+- [x] Tick-to-OHLC candle aggregation and stale-tick helper.
+- [x] Risk guard for daily loss, consecutive losses, daily trade cap, open-position cap, cooldown, emergency stop and TP/SL exit thresholds.
 - [x] Android APK GitHub Actions workflow.
-- [ ] Build and inspect APK artifact.
+- [ ] Build and inspect APK artifact after latest source changes.
 - [ ] Verify OTP schema and successful connection against a Deriv Demo account.
 - [ ] Display account list and balance.
-- [ ] Implement selectable market list and live tick/candle stream.
-- [ ] Implement tested fast-scalper strategy and autonomous execution loop.
-- [ ] Enforce entry/exit risk controls, duplicate prevention and open-position reconciliation.
+- [ ] Implement selectable market list and multi-market subscription management.
+- [ ] Wire tick stream -> candle builder -> signal engine -> risk guard -> proposal/buy -> position monitor/sell.
+- [ ] Add configurable settings UI and persistent risk/trade state.
+- [ ] Add duplicate-entry prevention, reconnect/backoff and open-position reconciliation.
 - [ ] Persistent trade history and realized P/L.
 - [ ] Complete Demo end-to-end validation on device.
 - [ ] Unlock Real only after all tests pass and user explicitly chooses it.
 
-Checked items mean code was added; they do not mean live API tests passed. Do not use real money with this build.
+Checked items mean source code was added; they do not mean live API tests passed. Do not use real money with an unverified build.
