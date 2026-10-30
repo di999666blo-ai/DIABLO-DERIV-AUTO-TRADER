@@ -782,8 +782,14 @@ class MainActivity : AppCompatActivity() {
                     markets.clear()
                     if (array != null) for (i in 0 until array.length()) {
                         val item = array.optJSONObject(i) ?: continue
-                        val symbolCode = item.optString("symbol")
-                        val display = item.optString("display_name", symbolCode)
+                        // The current Deriv Options API renamed the legacy fields:
+                        // symbol -> underlying_symbol; display_name -> underlying_symbol_name.
+                        // Keep legacy fallbacks so older compatible responses still work.
+                        val symbolCode = item.optString("underlying_symbol")
+                            .ifBlank { item.optString("symbol") }
+                        val display = item.optString("underlying_symbol_name")
+                            .ifBlank { item.optString("display_name") }
+                            .ifBlank { symbolCode }
                         if (symbolCode.isNotBlank()) markets.add(display to symbolCode)
                     }
                     val adapter = darkSpinnerAdapter(markets.map { "${it.first} (${it.second})" })
