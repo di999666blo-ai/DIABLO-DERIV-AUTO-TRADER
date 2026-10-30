@@ -293,7 +293,15 @@ class MainActivity : AppCompatActivity() {
                 background = rounded(if (primary) 0xFF8F1028.toInt() else 0xFF14243B.toInt(),
                     if (primary) red else 0xFF29466C.toInt(), 12f)
                 setPadding(12, 4, 12, 4)
-                setOnClickListener { onClick() }
+                minHeight = 48
+                minimumHeight = 48
+                isClickable = true
+                isFocusable = true
+                stateListAnimator = null
+                setOnClickListener {
+                    show("Button pressed: $title")
+                    onClick()
+                }
             }, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 8 })
         }
 
