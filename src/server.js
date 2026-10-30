@@ -14,6 +14,7 @@ const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.max
 const deriv=new DerivClient({token:config.apiToken,appId:config.appId});
 const ledger=new TradeLedger();
 let activeAccount=null;
+let activeMode="demo";
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 let autoRunner=null;
 const json=(res,status,data)=>{res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(data));};
@@ -38,12 +39,12 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
   if(!markets.every(x=>/^[A-Z0-9_]+$/i.test(x)))return json(res,400,{error:"Invalid market symbol"});
   if(autoRunner)return json(res,409,{error:"Autonomous scanner is already running"});
   const mode=config.mode;
-  await deriv.connect(accountId,mode);activeAccount=accountId;
+  await deriv.connect(accountId,mode);activeAccount=accountId;activeMode=mode;
   guard.arm();await persistRisk();
   let stopped=false,busy=false;
-  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),stop:()=>{stopped=true;}};
+  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},reconnectFailures:0,stop:()=>{stopped=true;}};
   const runCycle=async()=>{
-    if(stopped||busy||!deriv.connected)return;
+    if(stopped||busy)return;if(!deriv.connected){setTimeout(runCycle,5000).unref?.();return;}
     busy=true;
     try{
       const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
@@ -70,7 +71,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
         await persistRisk();await deriv.watchContract(contractId);
         console.log("DIABLO autonomous order",mode,symbol,signal.action,signal.score,contractId);
       }
-    }catch(error){console.error("Autonomous cycle failed:",error.message);if(!deriv.connected){guard.emergencyStop();await persistRisk().catch(()=>{});}}
+    }catch(error){console.error("Autonomous cycle failed:",error.message);if(!deriv.connected&&!stopped){try{await wait(5000);await deriv.connect(accountId,mode);console.log("DIABLO reconnected to Deriv",mode);}catch(reconnectError){console.error("Deriv reconnect failed:",reconnectError.message);autoRunner.reconnectFailures=(autoRunner.reconnectFailures||0)+1;if(autoRunner.reconnectFailures>=5){guard.emergencyStop();stopped=true;await persistRisk().catch(()=>{});}}}}
     finally{busy=false;if(stopped){autoRunner=null;return;}setTimeout(runCycle,config.scanIntervalMs).unref?.();}
   };
   runCycle();
@@ -85,11 +86,11 @@ if(req.method==="GET"&&req.url==="/api/status")return json(res,200,{name:"DIABLO
 if(req.method==="GET"&&req.url==="/api/ledger")return json(res,200,{ledger:ledger.snapshot()});
 if(req.method==="GET"&&req.url==="/api/accounts"){try{return json(res,200,{accounts:await deriv.accounts()});}catch(e){return json(res,400,{error:e.message});}}
 if(req.method==="POST"&&req.url==="/api/connect"){
-  const b=await body(req),selectedMode=b.mode==="real"?"real":"demo";if(selectedMode==="real"&&!config.liveTradingAck)return json(res,403,{error:"Live trading is locked. Configure LIVE_TRADING_ACK locally after reviewing all risks."});const r=await deriv.connect(String(b.accountId||""),selectedMode);activeAccount=r.accountId;
+  const b=await body(req),selectedMode=b.mode==="real"?"real":"demo";if(selectedMode==="real"&&!config.liveTradingAck)return json(res,403,{error:"Live trading is locked. Configure LIVE_TRADING_ACK locally after reviewing all risks."});const r=await deriv.connect(String(b.accountId||""),selectedMode);activeAccount=r.accountId;activeMode=selectedMode;
   for(const id of Object.keys(ledger.state.open)){try{await deriv.watchContract(id);}catch(e){console.error("Could not restore contract stream",id,e.message);}}
   return json(res,200,r);
 }
-if(req.method==="POST"&&req.url==="/api/disconnect"){deriv.close();activeAccount=null;return json(res,200,{connected:false});}
+if(req.method==="POST"&&req.url==="/api/disconnect"){deriv.close();activeAccount=null;activeMode="demo";return json(res,200,{connected:false});}
 if(req.method==="GET"&&req.url==="/api/symbols"){const symbols=deriv.connected?await deriv.symbols():await deriv.publicSymbols();return json(res,200,{symbols});}
 if(req.method==="POST"&&req.url==="/api/history"){const b=await body(req);return json(res,200,{candles:await deriv.history(String(b.symbol||""),b.count,b.granularity)});}
 if(req.method==="POST"&&req.url==="/api/analyze"){const b=await body(req);return json(res,200,analyzeCandles(b.candles,b.options));}
@@ -99,7 +100,7 @@ if(req.method==="POST"&&req.url==="/api/buy"){
   const b=await body(req);if(!deriv.connected||!activeAccount)return json(res,409,{error:"Connect a demo Options account first"});
   if(b.confirm!==true)return json(res,400,{error:"Explicit confirm=true is required"});
   const symbol=String(b.symbol||"UNKNOWN"),stake=Number(b.stake||guard.currentStake);
-  const gate=guard.canTrade({stake,autoTrade:true,mode:config.mode,symbol});
+  const gate=guard.canTrade({stake,autoTrade:true,mode:activeMode,symbol});
   if(!gate.ok)return json(res,403,{error:gate.reason});
   const result=await deriv.buy(String(b.proposalId||""),b.maxPrice);const contractId=result?.buy?.contract_id;
   if(!contractId)return json(res,502,{error:"Buy response did not contain a contract ID"});
@@ -132,7 +133,7 @@ if(req.method==="POST"&&req.url==="/api/scan-and-execute"){
   const placed=[],failed=[];
   for(const order of orders){
     const stake=guard.currentStake;
-    const gate=guard.canTrade({stake,autoTrade:true,mode:config.mode,symbol:order.symbol,ignoreCooldown:true});
+    const gate=guard.canTrade({stake,autoTrade:true,mode:activeMode,symbol:order.symbol,ignoreCooldown:true});
     if(!gate.ok){failed.push({symbol:order.symbol,sequence:order.sequence,reason:gate.reason});break;}
     try{
       const proposal=await deriv.proposal({symbol:order.symbol,action:order.action,stake,duration,durationUnit,currency:String(b.currency||"USD")});
