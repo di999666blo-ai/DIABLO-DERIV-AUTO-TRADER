@@ -1012,7 +1012,7 @@ class MainActivity : AppCompatActivity() {
             .format(java.util.Date())
         liveActivityLines.add(0, "[$time] $message")
         while (liveActivityLines.size > 35) liveActivityLines.removeAt(liveActivityLines.lastIndex)
-        liveActivityView.text = liveActivityLines.joinToString("\\n")
+        liveActivityView.text = liveActivityLines.joinToString("\n")
     }
 
     private fun showConnectionStatus(message: String) {
