@@ -62,7 +62,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
         const stake=guard.currentStake;
         const gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
         if(!gate.ok)continue;
-        const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:"USD"});
+        const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:config.autoCurrency});
         const purchase=await deriv.buy(proposal.id,Number(proposal.ask_price));
         const contractId=purchase?.buy?.contract_id;
         if(!contractId)throw Error("Buy response omitted contract ID");
@@ -136,7 +136,7 @@ if(req.method==="POST"&&req.url==="/api/scan-and-execute"){
     const gate=guard.canTrade({stake,autoTrade:true,mode:activeMode,symbol:order.symbol,ignoreCooldown:true});
     if(!gate.ok){failed.push({symbol:order.symbol,sequence:order.sequence,reason:gate.reason});break;}
     try{
-      const proposal=await deriv.proposal({symbol:order.symbol,action:order.action,stake,duration,durationUnit,currency:String(b.currency||"USD")});
+      const proposal=await deriv.proposal({symbol:order.symbol,action:order.action,stake,duration,durationUnit,currency:String(b.currency||config.autoCurrency)});
       const purchase=await deriv.buy(proposal.id,Number(proposal.ask_price));
       const contractId=purchase?.buy?.contract_id;
       if(!contractId)throw Error("Deriv buy response omitted contract ID");
