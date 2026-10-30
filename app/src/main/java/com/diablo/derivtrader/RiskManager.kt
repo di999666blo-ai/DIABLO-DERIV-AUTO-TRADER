@@ -47,8 +47,28 @@ class RiskManager(private val settings: RiskSettings) {
     }
 
     fun exitReason(openProfit: Double): String? = when {
+        !openProfit.isFinite() -> null
         openProfit >= settings.takeProfit -> "Take-profit reached"
         openProfit <= -settings.stopLoss -> "Stop-loss reached"
         else -> null
+    }
+
+    companion object {
+        /** Deterministic local checks for the risk gates; this does not replace live Demo testing. */
+        fun selfTest(): Boolean {
+            val manager = RiskManager(RiskSettings())
+            val clear = RiskSnapshot(0.0, 0, 0, 0, 0L)
+            val now = 100_000L
+            return manager.canEnter(clear, now).allowed &&
+                !manager.canEnter(clear.copy(emergencyStopped = true), now).allowed &&
+                !manager.canEnter(clear.copy(realizedPnlToday = -5.0), now).allowed &&
+                !manager.canEnter(clear.copy(consecutiveLosses = 3), now).allowed &&
+                !manager.canEnter(clear.copy(tradesToday = 20), now).allowed &&
+                !manager.canEnter(clear.copy(openPositions = 1), now).allowed &&
+                !manager.canEnter(clear.copy(lastEntryAtMillis = 90_000L), now).allowed &&
+                manager.exitReason(2.0) == "Take-profit reached" &&
+                manager.exitReason(-1.0) == "Stop-loss reached" &&
+                manager.exitReason(0.0) == null
+        }
     }
 }
