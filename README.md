@@ -23,7 +23,7 @@ The autonomous engine and real-account path have been added to source, but **the
 1. Install Node.js 20+, `tmux`, and (for automatic boot startup) Termux:Boot.
 2. Clone/download this repository into `~/DIABLO-DERIV-AUTO-TRADER`.
 3. Copy `.env.example` to `.env`.
-4. Put your Deriv App ID, PAT with the `trade` permission, and account ID in the local `.env`. Never paste credentials into chat or commit `.env`.
+4. Put your Deriv App ID, PAT with the `trade` permission, and account ID in the local `.env`. Set `AUTO_CURRENCY` to the currency of that Deriv Options account. Never paste credentials into chat or commit `.env`.
 5. First test with `TRADING_MODE=demo`, `AUTO_TRADE=false`. Run `npm install && npm run check && npm test`.
 6. Start the service with `node --env-file=.env src/server.js`. Open `http://127.0.0.1:8787` on the same phone.
 7. Test account connection, market list, analysis, contract proposals, stop control, ledger and reconnect behavior on demo before enabling unattended execution.
@@ -32,7 +32,7 @@ The autonomous engine and real-account path have been added to source, but **the
 
 In local `.env` only, set `AUTO_TRADE=true`, `AUTO_ACCOUNT_ID=<your Deriv Options account ID>`, and `AUTO_MARKETS=R_10,R_25` (replace with symbols available to your account). Adjust `AUTO_GRANULARITY`, `AUTO_DURATION`, `MIN_SIGNAL_SCORE`, and risk limits conservatively. `AUTO_START=true` makes the scanner attempt to start when the Node service boots. The account must be reachable and configured.
 
-Start manually by POSTing JSON `{"confirm":true}` to `/api/automation/start`; check `/api/automation/status`; stop new entries with POST `{"confirm":true}` to `/api/automation/stop`. The service is bound to loopback only.
+From the dashboard, select markets and use **START AUTO SCANNER**; the scanner connects to Deriv, reads its candles, and places demo contracts when the strategy and risk guard permit. **STOP AUTO SCANNER** halts new entries. The API equivalents are POST `{"confirm":true}` to `/api/automation/start`, GET `/api/automation/status`, and POST `{"confirm":true}` to `/api/automation/stop`. The service is bound to loopback only.
 
 ### Real-account mode
 
