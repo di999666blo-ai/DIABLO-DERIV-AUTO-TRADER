@@ -32,6 +32,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var maxLosses: EditText
     private lateinit var maxTrades: EditText
     private lateinit var cooldown: EditText
+    private lateinit var maxPositions: EditText
+    private lateinit var perMarketLimit: EditText
+    private lateinit var progressionSwitch: Switch
     private lateinit var log: TextView
     private lateinit var balanceView: TextView
     private lateinit var historyView: TextView
@@ -80,6 +83,9 @@ class MainActivity : AppCompatActivity() {
         maxLosses.setText(prefs.getString("maxLosses", "3"))
         maxTrades.setText(prefs.getString("maxTrades", "20"))
         cooldown.setText(prefs.getString("cooldown", "30"))
+        maxPositions.setText(prefs.getString("maxPositions", "3"))
+        perMarketLimit.setText(prefs.getString("perMarketLimit", "5"))
+        progressionSwitch.isChecked = prefs.getBoolean("stakeProgressionEnabled", false)
         showHistory()
         api.onUpdate = { message ->
             runOnUiThread {
@@ -396,8 +402,20 @@ class MainActivity : AppCompatActivity() {
         maxTrades = field(risk, "Maximum trades per day", "20")
         label(risk, "Cooldown between entries (seconds)")
         cooldown = field(risk, "Cooldown seconds", "30")
+        label(risk, "Maximum simultaneous open contracts (1–20)")
+        maxPositions = field(risk, "Max open contracts", "3")
+        label(risk, "Maximum trades per selected market (1–100)")
+        perMarketLimit = field(risk, "Per-market trade quantity", "5")
+        progressionSwitch = Switch(this).apply {
+            text = "WIN-BASED STAKE PROGRESSION  1 → 2 → 3 → 4 → 5"
+            setTextColor(white)
+            textSize = 11f
+            isChecked = false
+            setPadding(2, 12, 2, 8)
+        }
+        risk.addView(progressionSwitch)
 
-        val execution = section("04  /  EXECUTION", "One open position at a time. Emergency stop prevents new entries.")
+        val execution = section("04  /  EXECUTION", "Multiple independent contracts. Emergency stop prevents new entries.")
         action(execution, "START AUTOMATIC SCALPING", true) { startTrading() }
         action(execution, "EMERGENCY STOP / DISCONNECT") {
             reconnectEnabled = false
@@ -723,7 +741,9 @@ class MainActivity : AppCompatActivity() {
         val lossLimit = maxLosses.text.toString().toIntOrNull() ?: 0
         val tradesLimit = maxTrades.text.toString().toIntOrNull() ?: 0
         val cooldownSeconds = cooldown.text.toString().toLongOrNull() ?: 0L
-        if (stakeValue <= 0 || multiplierValue <= 0 || tp <= 0 || sl <= 0 || dailyLossValue <= 0 || lossLimit <= 0 || tradesLimit <= 0 || cooldownSeconds < 0) {
+        val positionLimit = maxPositions.text.toString().toIntOrNull() ?: 0
+        val marketLimit = perMarketLimit.text.toString().toIntOrNull() ?: 0
+        if (stakeValue <= 0 || multiplierValue <= 0 || tp <= 0 || sl <= 0 || dailyLossValue <= 0 || lossLimit <= 0 || tradesLimit <= 0 || cooldownSeconds < 0 || positionLimit !in 1..20 || marketLimit !in 1..100) {
             show("Stake, multiplier, take profit and stop loss must all be greater than zero.")
             return
         }
@@ -739,6 +759,9 @@ class MainActivity : AppCompatActivity() {
             .putString("maxLosses", maxLosses.text.toString())
             .putString("maxTrades", maxTrades.text.toString())
             .putString("cooldown", cooldown.text.toString())
+            .putString("maxPositions", maxPositions.text.toString())
+            .putString("perMarketLimit", perMarketLimit.text.toString())
+            .putBoolean("stakeProgressionEnabled", progressionSwitch.isChecked)
             .apply()
         val dailyStats = calculateTodayRiskStats()
         val config = TraderConfig(
@@ -755,7 +778,10 @@ class MainActivity : AppCompatActivity() {
             cooldownMillis = cooldownSeconds * 1000L,
             initialRealizedPnl = dailyStats.first,
             initialConsecutiveLosses = dailyStats.second,
-            initialTradesToday = dailyStats.third
+            initialTradesToday = dailyStats.third,
+            maxOpenPositions = positionLimit,
+            maxTradesPerMarket = marketLimit,
+            stakeProgressionEnabled = progressionSwitch.isChecked
         )
         show("Checking Deriv for existing open positions before starting…")
         api.portfolio { portfolioResult ->
