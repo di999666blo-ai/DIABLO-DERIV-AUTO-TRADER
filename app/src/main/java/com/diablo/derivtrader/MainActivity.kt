@@ -95,6 +95,26 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+
+    private fun darkSpinnerAdapter(items: List<String>): ArrayAdapter<String> =
+        object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
+            override fun getView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                return (super.getView(position, convertView, parent) as TextView).apply {
+                    setTextColor(0xFFF4F7FF.toInt())
+                    textSize = 14f
+                    setPadding(12, 0, 12, 0)
+                }
+            }
+            override fun getDropDownView(position: Int, convertView: android.view.View?, parent: android.view.ViewGroup): android.view.View {
+                return (super.getDropDownView(position, convertView, parent) as TextView).apply {
+                    setTextColor(0xFFF4F7FF.toInt())
+                    setBackgroundColor(0xFF0E172A.toInt())
+                    textSize = 14f
+                    setPadding(16, 12, 16, 12)
+                }
+            }
+        }.also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
     private fun render() {
         val pageBackground = 0xFF02040A.toInt()
         val cardBackground = 0xFF0E172A.toInt()
@@ -175,8 +195,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 12, 0, 0)
         }
         modeSpinner = Spinner(this)
-        modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            if (realUnlocked) listOf("DEMO ACCOUNT", "REAL — UNLOCKED") else listOf("DEMO ACCOUNT", "REAL — LOCKED"))
+        modeSpinner.adapter = darkSpinnerAdapter(if (realUnlocked) listOf("DEMO ACCOUNT", "REAL — UNLOCKED") else listOf("DEMO ACCOUNT", "REAL — LOCKED"))
         modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
@@ -317,7 +336,7 @@ class MainActivity : AppCompatActivity() {
         }
         connection.addView(connectionStatusView)
         accountSpinner = Spinner(this)
-        accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load accounts first"))
+        accountSpinner.adapter = darkSpinnerAdapter(listOf("Load accounts first"))
         accountSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
@@ -333,7 +352,7 @@ class MainActivity : AppCompatActivity() {
 
         val marketsCard = section("02  /  MARKET SCANNER", "Choose active Deriv symbols. Multiplier availability is checked per market.")
         marketSpinner = Spinner(this)
-        marketSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, mutableListOf("Load markets first"))
+        marketSpinner.adapter = darkSpinnerAdapter(listOf("Load markets first"))
         marketsCard.addView(marketSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 6 })
         action(marketsCard, "LOAD ACTIVE MARKETS") { loadMarkets() }
         action(marketsCard, "SELECT UP TO 20 MARKETS") { showMarketPicker() }
@@ -453,7 +472,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     realUnlocked = true
                     prefs.edit().putBoolean("real_unlocked", true).apply()
-                    modeSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("DEMO", "REAL — UNLOCKED"))
+                    modeSpinner.adapter = darkSpinnerAdapter(listOf("DEMO", "REAL — UNLOCKED"))
                     modeSpinner.setSelection(0)
                     selectedMode = "demo"
                     show("Real mode unlocked after a recorded Demo close and passing risk self-tests. Select your Real account and connect manually; trading will not start automatically.")
@@ -503,7 +522,7 @@ class MainActivity : AppCompatActivity() {
                         val single = response.optJSONObject("data") ?: response.optJSONObject("account")
                         if (single != null && single.optString("account_id").isNotBlank()) demoAccounts.add(single)
                     }
-                    accountSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+                    accountSpinner.adapter = darkSpinnerAdapter(
                         demoAccounts.map { "${accountModeOf(it)} | ${it.optString("account_id")} | ${it.optString("currency")} | balance ${it.optString("balance")}" })
                     showConnectionStatus(if (demoAccounts.isEmpty()) "Deriv responded, but no account records were found. Check that this PAT belongs to the expected Deriv account." else "✅ Found ${demoAccounts.size} account(s). Select the account matching DEMO mode.")
                 }.onFailure { showConnectionStatus("❌ Account discovery failed: ${it.message}") }
@@ -618,8 +637,7 @@ class MainActivity : AppCompatActivity() {
                         val display = item.optString("display_name", symbolCode)
                         if (symbolCode.isNotBlank()) markets.add(display to symbolCode)
                     }
-                    val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-                        markets.map { "${it.first} (${it.second})" })
+                    val adapter = darkSpinnerAdapter(markets.map { "${it.first} (${it.second})" })
                     marketSpinner.adapter = adapter
                     showMarketStatus(if (markets.isEmpty()) "Deriv returned no active markets for this account." else "✅ Loaded ${markets.size} active markets. Select one, then check multiplier support.")
                 }.onFailure { showMarketStatus("❌ Market load failed: ${it.message}") }
