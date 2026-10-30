@@ -24,7 +24,8 @@ data class TraderConfig(
     val maxOpenPositions: Int = 1,
     val maxTradesPerMarket: Int = 1,
     val stakeProgressionEnabled: Boolean = false,
-    val stakeProgression: List<Double> = listOf(1.0, 2.0, 3.0, 4.0, 5.0)
+    val stakeProgression: List<Double> = listOf(1.0, 2.0, 3.0, 4.0, 5.0),
+    val marketTradeLimits: Map<String, Int> = emptyMap()
 )
 
 data class TradeRecord(
@@ -187,7 +188,7 @@ class TradingController(
             onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | ${signal.reason}")
             if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
             if (!running.get() || symbol in pendingSymbols || positions.values.any { it.symbol == symbol }) return
-            if ((marketTradeCounts[symbol] ?: 0) >= config.maxTradesPerMarket) {
+            val pairLimit = config.marketTradeLimits[symbol] ?: config.maxTradesPerMarket\n            if (pairLimit !in 1..100 || (marketTradeCounts[symbol] ?: 0) >= pairLimit) {
                 onStatus("$symbol per-market trade quantity limit reached."); return
             }
             val decision = risk.canEnter(RiskSnapshot(
