@@ -315,7 +315,7 @@ class MainActivity : AppCompatActivity() {
                 val item = demoAccounts.getOrNull(position) ?: return
                 account.setText(item.optString("account_id"))
                 accountCurrency = item.optString("currency", "USD")
-                balanceView.text = "SELECTED \${accountModeOf(item).uppercase()}: \${item.optString("account_id")}  •  \${item.optString("balance")} $accountCurrency"
+                balanceView.text = "SELECTED ${accountModeOf(item).uppercase()}: ${item.optString("account_id")}  •  ${item.optString("balance")} $accountCurrency"
             }
         }
         connection.addView(accountSpinner, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 7 })
@@ -354,7 +354,7 @@ class MainActivity : AppCompatActivity() {
             mainHandler.removeCallbacks(reconnectRunnable)
             controller?.stop()
             if (controller?.hasOpenPosition() == true) {
-                show("New entries stopped. Existing \${selectedMode.uppercase()} position remains connected and monitored for its exit rules. Keep the app open until it closes.")
+                show("New entries stopped. Existing ${selectedMode.uppercase()} position remains connected and monitored for its exit rules. Keep the app open until it closes.")
             } else {
                 api.disconnect()
                 show("Stopped and disconnected. No open position was being monitored.")
