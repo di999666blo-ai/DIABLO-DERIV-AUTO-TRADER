@@ -63,6 +63,10 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
         const gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
         if(!gate.ok)continue;
         const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:config.autoCurrency});
+        // Stop requests may arrive while the proposal request is in flight.
+        // Re-check immediately before purchase so an emergency stop cannot
+        // knowingly allow a queued autonomous entry to proceed.
+        if(stopped||guard.stopped)break;
         const purchase=await deriv.buy(proposal.id,Number(proposal.ask_price));
         const contractId=purchase?.buy?.contract_id;
         if(!contractId)throw Error("Buy response omitted contract ID");
@@ -123,7 +127,10 @@ if(req.method==="POST"&&req.url==="/api/scan-and-execute"){
     if(!available.has(symbol)){signals.push({symbol,action:"WAIT",reason:"Market unavailable for this account"});continue;}
     try{
       const candles=await deriv.history(symbol,100,Number(b.granularity||60));
-      const signal=analyzeCandles(candles,{minScore:config.minSignalScore});
+      // Deriv includes the still-forming final candle. Analyze closed candles
+      // only, matching the autonomous scanner and avoiding intrabar signals.
+      const closedCandles=candles.length>1?candles.slice(0,-1):[];
+      const signal=analyzeCandles(closedCandles,{minScore:config.minSignalScore});
       signals.push({symbol,...signal});
     }catch(error){signals.push({symbol,action:"WAIT",reason:"Market analysis failed: "+error.message});}
   }
