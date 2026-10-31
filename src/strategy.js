@@ -13,22 +13,42 @@ function ema(values,period){
 function rsi(values,period=14){
   if(values.length<=period)return null;
   let gain=0,loss=0;
-  for(let i=values.length-period;i<values.length;i++){
+  for(let i=1;i<=period;i++){
     const change=values[i]-values[i-1];
     if(change>0)gain+=change;else loss-=change;
   }
-  if(loss===0)return gain===0?50:100;
-  return 100-100/(1+gain/loss);
+  let avgGain=gain/period,avgLoss=loss/period;
+  for(let i=period+1;i<values.length;i++){
+    const change=values[i]-values[i-1];
+    avgGain=(avgGain*(period-1)+Math.max(0,change))/period;
+    avgLoss=(avgLoss*(period-1)+Math.max(0,-change))/period;
+  }
+  if(avgLoss===0)return avgGain===0?50:100;
+  return 100-100/(1+avgGain/avgLoss);
 }
-function atrPercent(rows,period=14){
-  if(rows.length<period+1)return null;
+function trueRanges(rows){
   const ranges=[];
   for(let i=1;i<rows.length;i++){
     const c=rows[i],p=rows[i-1];
     ranges.push(Math.max(c.high-c.low,Math.abs(c.high-p.close),Math.abs(c.low-p.close)));
   }
-  const atr=mean(ranges.slice(-period));
+  return ranges;
+}
+function median(values){
+  if(!values.length)return 0;
+  const sorted=[...values].sort((a,b)=>a-b),mid=Math.floor(sorted.length/2);
+  return sorted.length%2?sorted[mid]:(sorted[mid-1]+sorted[mid])/2;
+}
+function atrPercent(rows,period=14){
+  if(rows.length<period+1)return null;
+  const ranges=trueRanges(rows),atr=mean(ranges.slice(-period));
   return rows.at(-1).close===0?null:atr/Math.abs(rows.at(-1).close)*100;
+}
+function relativeVolatility(rows,period=14){
+  const ranges=trueRanges(rows);
+  if(ranges.length<period)return null;
+  const baseline=median(ranges.slice(-30));
+  return baseline>0?mean(ranges.slice(-period))/baseline:null;
 }
 function efficiency(values,period=10){
   if(values.length<=period)return 0;
@@ -55,13 +75,15 @@ export function analyzeCandles(candles,options={}){
   if(rows.length<minimum)return base;
   const closes=rows.map(c=>c.close),last=rows.at(-1),prev=rows.at(-2);
   const fast=ema(closes,fastPeriod),slow=ema(closes,slowPeriod),momentum=rsi(closes,rsiPeriod);
-  const atr=atrPercent(rows),er=efficiency(closes,Math.min(10,rows.length-1));
-  if([fast,slow,momentum,atr].some(v=>v===null||!Number.isFinite(v)))return{...base,reason:"Indicator calculation unavailable"};
-  // Avoid dead markets and extreme spikes; thresholds adapt to observed volatility.
-  const volatility=atr<0.015?"LOW":atr>0.35?"HIGH":"NORMAL";
+  const atr=atrPercent(rows),volRatio=relativeVolatility(rows),er=efficiency(closes,Math.min(10,rows.length-1));
+  if([fast,slow,momentum,atr,volRatio].some(v=>v===null||!Number.isFinite(v)))return{...base,reason:"Indicator calculation unavailable"};
+  // Relative ATR adapts across Deriv symbols with very different quote scales.
+  const volatility=volRatio<0.35?"LOW":volRatio>2.5?"HIGH":"NORMAL";
   const regime=er>0.55?"TRENDING":er<0.20?"RANGING":"MIXED";
-  if(volatility==="HIGH")return{...base,reason:"Volatility spike: stand aside",regime,volatility,indicators:{fast,slow,rsi:momentum,atrPercent:atr,efficiency:er}};
-  if(regime==="RANGING")return{...base,reason:"Ranging market: no directional edge",regime,volatility,indicators:{fast,slow,rsi:momentum,atrPercent:atr,efficiency:er}};
+  const diagnostics={fast,slow,rsi:momentum,atrPercent:atr,volatilityRatio:volRatio,efficiency:er};
+  if(volatility==="HIGH")return{...base,reason:"Volatility spike: stand aside",regime,volatility,indicators:diagnostics};
+  if(volatility==="LOW")return{...base,reason:"Dead volatility: stand aside",regime,volatility,indicators:diagnostics};
+  if(regime==="RANGING")return{...base,reason:"Ranging market: no directional edge",regime,volatility,indicators:diagnostics};
   const range=Math.max(last.high-last.low,Math.abs(last.close)*1e-12);
   const body=Math.abs(last.close-last.open)/range;
   const candleUp=last.close>last.open&&last.close>prev.close;
@@ -81,7 +103,7 @@ export function analyzeCandles(candles,options={}){
     action,score:action==="WAIT"?score:score,
     reason:action==="WAIT"?(direction==="WAIT"?"Trend, momentum and closed-candle structure are not aligned":"Setup below adaptive quality threshold"):`Adaptive ${regime.toLowerCase()} ${action.toLowerCase()} setup confirmed on a closed candle`,
     regime,volatility,candleCount:rows.length,candleEpoch:last.epoch,
-    indicators:{fast,slow,rsi:momentum,atrPercent:atr,efficiency:er,bodyRatio:body},
+    indicators:{...diagnostics,bodyRatio:body},
     note:"Score measures setup alignment; it is not a win-rate or profit probability."
   };
 }
@@ -117,7 +139,12 @@ export function analyzeTickMomentum(ticks,symbol="",options={}){
     if(after.length<2)return {...base,reason:"Spike detected; waiting for two follow-through ticks",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     const spikeMove=tail[spikeIndex],follow=after.slice(0,2);
     const held=follow.every(x=>Math.sign(x)===expected||x===0);
-    const netAfter=rows.at(-1).quote-rows[Math.max(0,rows.length-1-after.length-spikeIndex)].quote;
+    // Compare the current quote with the quote immediately after the spike.
+    // The previous index formula anchored before the spike and missed retraces.
+    const postSpikeIndex=rows.length-tail.length+spikeIndex;
+    const postSpikeQuote=rows[postSpikeIndex]?.quote;
+    if(!Number.isFinite(postSpikeQuote))return {...base,reason:"Spike reference price unavailable",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
+    const netAfter=rows.at(-1).quote-postSpikeQuote;
     const retrace=Math.max(0,-expected*netAfter);
     if(!held||retrace>Math.abs(spikeMove)*0.5)return {...base,reason:"Spike failed follow-through; stand aside",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     direction=expected>0?"UP":"DOWN";
