@@ -200,6 +200,19 @@ class DerivApi {
     fun portfolio(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("portfolio", 1), done)
 
+    fun candleHistory(symbol: String, granularity: Int, done: (Result<JSONObject>) -> Unit) {
+        require(symbol.matches(Regex("[A-Za-z0-9_]+"))) { "Invalid Deriv market symbol" }
+        require(granularity in setOf(60,120,180,300,600,900,1800,3600,7200,14400,28800,86400)) {
+            "Unsupported Deriv candle timeframe"
+        }
+        request(JSONObject()
+            .put("ticks_history", symbol)
+            .put("count", 100)
+            .put("end", "latest")
+            .put("style", "candles")
+            .put("granularity", granularity), done)
+    }
+
     fun balance(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("balance", 1).put("subscribe", 1), done)
 
