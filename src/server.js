@@ -10,7 +10,7 @@ import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
 
 const root=resolve(fileURLToPath(new URL("../public",import.meta.url)));
-const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,allowLive:config.liveTradingAck});
+const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,maxOpenTrades:config.maxOpenTrades,maxTradesPerMarket:config.maxTradesPerMarket,allowLive:config.liveTradingAck});
 const deriv=new DerivClient({token:config.apiToken,appId:config.appId});
 const ledger=new TradeLedger();
 let activeAccount=null;
