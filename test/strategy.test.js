@@ -117,3 +117,18 @@ test("closed-candle volatility filter adapts to a sudden range expansion",()=>{
   assert.equal(result.volatility,"HIGH");
   assert.match(result.reason,/Volatility spike/);
 });
+
+
+test("BOOM spike is blocked until a full closed-candle context exists",()=>{
+  const tick={action:"UP",score:76,marketProfile:"BOOM_SPIKE"};
+  const warmup={action:"WAIT",score:0,reason:"Insufficient closed candles",candleCount:20};
+  assert.equal(confirmPrecisionEntry(tick,warmup,"BOOM1000").action,"WAIT");
+  assert.match(confirmPrecisionEntry(tick,warmup,"BOOM1000").reason,/Insufficient closed-candle context/);
+});
+
+test("BOOM spike retracement after the impulse is measured from the post-spike quote",()=>{
+  const quotes=[100,100.01,100.00,100.02,100.01,100.03,100.02,100.04,100.03,100.05,100.04,100.06,100.56,100.61,100.66,100.36];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch})),"BOOM1000");
+  assert.equal(result.action,"WAIT");
+  assert.match(result.reason,/follow-through|stand aside/i);
+});
