@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statsView: TextView
     private lateinit var liveActivityView: TextView
     private lateinit var portfolioView: TextView
+    private lateinit var chartView: DerivCandleChartView
     private val liveActivityLines = mutableListOf<String>()
     private val lastContractActivityAt = mutableMapOf<Long, Long>()
     private var connectionStatusView: TextView? = null
@@ -614,13 +615,39 @@ class MainActivity : AppCompatActivity() {
         action(portfolio, "REFRESH OPEN POSITIONS") { refreshPortfolio() }
 
         activePage = "charts"
-        val chartsInfo = section("CHARTS GALLERY", "Market chart workspace")
+        val chartsInfo = section("CHARTS GALLERY", "Real Deriv candles - no simulated prices")
         chartsInfo.addView(TextView(this).apply {
-            text = "This build does not yet contain an in-app chart renderer or saved chart gallery. No sample chart is shown as live market data. Use the Deriv chart for visual price analysis while this workspace is being built."
+            text = "Connect your Deriv account, load active markets in Trade Now, then select a market and timeframe below."
             textSize = 11f
             setTextColor(muted)
-            setPadding(2, 10, 2, 4)
+            setPadding(2, 4, 2, 8)
         })
+        val chartTimeframe = Spinner(this)
+        val chartPeriods = listOf("1 MINUTE" to 60, "2 MINUTES" to 120, "3 MINUTES" to 180, "5 MINUTES" to 300, "15 MINUTES" to 900, "1 HOUR" to 3600)
+        chartTimeframe.adapter = darkSpinnerAdapter(chartPeriods.map { it.first })
+        chartsInfo.addView(chartTimeframe, LinearLayout.LayoutParams(-1, 48))
+        chartView = DerivCandleChartView(this)
+        chartsInfo.addView(chartView, LinearLayout.LayoutParams(-1, 260).apply { topMargin = 10 })
+        action(chartsInfo, "LOAD / REFRESH DERIV CANDLES", true) {
+            val symbol = selectedSymbol()
+            if (symbol == null) {
+                chartView.setLoading("Load active markets in Trade Now first.")
+            } else if (!api.connected) {
+                chartView.setLoading("Connect your Deriv account to load authenticated candles.")
+            } else {
+                val period = chartPeriods.getOrNull(chartTimeframe.selectedItemPosition) ?: chartPeriods.first()
+                chartView.setLoading("Loading " + symbol + " " + period.first + " candles from Deriv...")
+                api.candleHistory(symbol, period.second) { result ->
+                    runOnUiThread {
+                        result.onSuccess { response ->
+                            val rows = response.optJSONArray("candles")
+                            if (rows == null) chartView.setLoading("Deriv returned no candle array.")
+                            else chartView.setCandles(symbol, period.first, rows)
+                        }.onFailure { chartView.setLoading("Chart request failed: " + it.message) }
+                    }
+                }
+            }
+        }
         activePage = "guide"
         val guide = section("HOW TO START SAFELY", "Follow these steps in order")
         listOf(
@@ -816,7 +843,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     portfolioView.text = if (contracts == null || contracts.length() == 0)
                         lines.joinToString("\n") + "\nNo currently open positions on this account."
-                    else lines.joinToString("\\n")
+                    else lines.joinToString("\n")
                 }.onFailure {
                     portfolioView.text = "Portfolio request failed: ${it.message}"
                 }
