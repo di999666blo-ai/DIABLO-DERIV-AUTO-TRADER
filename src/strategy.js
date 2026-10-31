@@ -146,7 +146,7 @@ export function analyzeTickMomentum(ticks,symbol="",options={}){
     if(!Number.isFinite(postSpikeQuote))return {...base,reason:"Spike reference price unavailable",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     const netAfter=rows.at(-1).quote-postSpikeQuote;
     const retrace=Math.max(0,-expected*netAfter);
-    if(!held||retrace>Math.abs(spikeMove)*0.5)return {...base,reason:"Spike failed follow-through; stand aside",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
+    if(!held||retrace>=Math.abs(spikeMove)*0.5)return {...base,reason:"Spike failed follow-through; stand aside",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     direction=expected>0?"UP":"DOWN";
     score=76;
     reason="Observed characteristic spike with two confirming follow-through ticks";
