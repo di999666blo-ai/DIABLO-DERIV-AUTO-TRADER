@@ -51,7 +51,7 @@ test("disabled progression always restores the configured base stake",()=>{
 });
 
 test("midnight rollover resets daily counters but preserves open contract exposure",()=>{
-  const g=new RiskGuard({maxOpenTrades:2,maxTradesPerMarket:1,cooldownMs:0});
+  const g=new RiskGuard({maxOpenTrades:1,maxTradesPerMarket:1,cooldownMs:0});
   g.arm();
   g.recordTrade({symbol:"frxEURUSD"});
   const yesterday=new Date(Date.now()-86400000);
@@ -67,7 +67,7 @@ test("midnight rollover resets daily counters but preserves open contract exposu
 });
 
 test("restore from yesterday clears daily counters but keeps unsettled positions",()=>{
-  const g=new RiskGuard({maxOpenTrades:2,maxTradesPerMarket:1,cooldownMs:0});
+  const g=new RiskGuard({maxOpenTrades:1,maxTradesPerMarket:1,cooldownMs:0});
   g.restore({
     day:g.dayKey(new Date(Date.now()-86400000)),
     stopped:false,trades:12,dailyLoss:8,consecutiveLosses:3,lastTradeAt:123,
