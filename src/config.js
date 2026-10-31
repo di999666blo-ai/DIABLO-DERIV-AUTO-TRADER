@@ -24,7 +24,6 @@ export const config = Object.freeze({
   maxOpenTrades: Math.trunc(num("MAX_OPEN_TRADES", 1)),
   maxConsecutiveLosses: Math.trunc(num("MAX_CONSECUTIVE_LOSSES", 3)),
   maxTradesPerMarket: Math.trunc(num("MAX_OPEN_TRADES_PER_MARKET", 1)),
-  maxConsecutiveLosses: Math.trunc(num("MAX_CONSECUTIVE_LOSSES", 3)),
   cooldownSeconds: Math.trunc(num("COOLDOWN_SECONDS", 120)),
   defaultStake: num("DEFAULT_STAKE", 1),
   maxStake: num("MAX_STAKE", 5),
