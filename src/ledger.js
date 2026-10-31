@@ -40,11 +40,14 @@ export class TradeLedger {
   async settle(contract) {
     const id = String(contract.contract_id || contract.contractId || "");
     if (!id || this.state.closed.some(x => x.contractId === id)) return {recorded:false, duplicate:Boolean(id)};
+    // Only settle contracts this ledger actually opened or recovered. An
+    // unrelated/stale stream update must never alter the user's P/L history.
+    const prior = this.state.open[id];
+    if (!prior) return {recorded:false, unknown:true};
     const terminal = contract.is_sold === 1 || contract.is_sold === true || contract.is_expired === 1 || contract.is_expired === true || ["won","lost","sold"].includes(String(contract.status||"").toLowerCase());
     if (!terminal) return {recorded:false, pending:true};
     const profit = Number(contract.profit);
     if (!Number.isFinite(profit)) return {recorded:false, pending:true, reason:"Settlement profit not available yet"};
-    const prior = this.state.open[id] || {};
     const row = {contractId:id, symbol:contract.underlying || prior.symbol || "UNKNOWN", profit, status:contract.status || (profit >= 0 ? "won":"lost"), stake:Number(contract.buy_price ?? prior.stake ?? 0), settledAt:new Date().toISOString()};
     delete this.state.open[id];
     this.state.closed.push(row);
