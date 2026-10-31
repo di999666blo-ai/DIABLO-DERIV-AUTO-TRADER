@@ -4,7 +4,7 @@ import {resolve,extname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {config} from "./config.js";
 import {RiskGuard} from "./risk.js";
-import {analyzeCandles} from "./strategy.js";
+import {analyzeCandles,analyzeTickMomentum} from "./strategy.js";
 import {DerivClient} from "./deriv.js";
 import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
@@ -41,51 +41,62 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
   const mode=config.mode;
   await deriv.connect(accountId,mode);activeAccount=accountId;activeMode=mode;for(const id of Object.keys(ledger.state.open)){try{await deriv.watchContract(id);}catch(e){console.error("Could not restore contract monitor",id,e.message);}}
   guard.arm();await persistRisk();
-  let stopped=false,busy=false;
-  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},reconnectFailures:0,stop:()=>{stopped=true;}};
-  const runCycle=async()=>{
-    if(stopped||busy)return;if(!deriv.connected){try{autoRunner.reconnectFailures=(autoRunner.reconnectFailures||0)+1;if(autoRunner.reconnectFailures>5){guard.emergencyStop();stopped=true;await persistRisk();return;}await deriv.connect(accountId,mode);autoRunner.reconnectFailures=0;console.log("DIABLO reconnected to Deriv",mode);}catch(e){console.error("Deriv reconnect attempt failed:",e.message);setTimeout(runCycle,5000).unref?.();return;}}
-    busy=true;
+  let stopped=false;
+  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},tickState:{},subscriptions:[],stop:()=>{stopped=true;for(const sub of autoRunner?.subscriptions||[])deriv.unsubscribeTicks(sub.id).catch(()=>{});}};
+  const evaluateTick=async(symbol,tick)=>{
+    const runner=autoRunner;if(stopped||!runner||guard.stopped||!deriv.connected)return;
+    const state=runner.tickState[symbol];if(!state)return;
+    const quote=Number(tick.quote),epoch=Number(tick.epoch||0);if(!(quote>0))return;
+    if(state.ticks.length&&epoch&&epoch===state.lastEpoch)return;
+    state.lastEpoch=epoch;state.ticks.push({quote,epoch});if(state.ticks.length>40)state.ticks.shift();
+    if(state.evaluating||state.ticks.length<14)return;
+    const signal=analyzeTickMomentum(state.ticks,symbol,{minScore:config.minSignalScore});
+    state.lastSignal=signal;
+    if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)return;
+    const now=Date.now();if(now-state.lastEntryAt<Math.max(5000,config.cooldownSeconds*1000))return;
+    state.evaluating=true;
     try{
-      const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
-      for(const symbol of autoRunner.markets){
-        if(stopped)break;
-        if(!available.has(symbol))continue;
-        const candles=await deriv.history(symbol,100,config.autoGranularity);
-        const closed=candles.length>1?candles.slice(0,-1):[];
-        const signal=analyzeCandles(closed,{minScore:config.minSignalScore});
-        if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)continue;
-        const candle=closed.at(-1);const candleKey=String(candle.epoch||candle.open||"");
-        const lastKey=autoRunner.lastProcessed?.[symbol];
-        if(!candleKey||lastKey===candleKey)continue;
-        autoRunner.lastProcessed??={};autoRunner.lastProcessed[symbol]=candleKey;
-        const stake=guard.currentStake;
-        const gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
-        if(!gate.ok)continue;
-        const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:config.autoCurrency});
-        // Stop requests may arrive while the proposal request is in flight.
-        // Re-check immediately before purchase so an emergency stop cannot
-        // knowingly allow a queued autonomous entry to proceed.
-        if(stopped||guard.stopped)break;
-        const purchase=await deriv.buy(proposal.id,Number(proposal.ask_price));
-        const contractId=purchase?.buy?.contract_id;
-        if(!contractId)throw Error("Buy response omitted contract ID");
-        guard.recordTrade({symbol});
-        await ledger.recordOpen({contract_id:contractId,symbol,stake,action:signal.action,score:signal.score,source:"autonomous"});
-        await persistRisk();await deriv.watchContract(contractId);
-        console.log("DIABLO autonomous order",mode,symbol,signal.action,signal.score,contractId);
-      }
-    }catch(error){console.error("Autonomous cycle failed:",error.message);if(!deriv.connected&&!stopped){try{await wait(5000);await deriv.connect(accountId,mode);console.log("DIABLO reconnected to Deriv",mode);}catch(reconnectError){console.error("Deriv reconnect failed:",reconnectError.message);autoRunner.reconnectFailures=(autoRunner.reconnectFailures||0)+1;if(autoRunner.reconnectFailures>=5){guard.emergencyStop();stopped=true;await persistRisk().catch(()=>{});}}}}
-    finally{busy=false;if(stopped){autoRunner=null;return;}setTimeout(runCycle,config.scanIntervalMs).unref?.();}
+      const stake=guard.currentStake,gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
+      if(!gate.ok)return;
+      const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:config.autoCurrency});
+      if(stopped||guard.stopped||!deriv.connected)return;
+      const purchase=await deriv.buy(proposal.id,Number(proposal.ask_price));
+      const contractId=purchase?.buy?.contract_id;if(!contractId)throw Error("Buy response omitted contract ID");
+      guard.recordTrade({symbol});state.lastEntryAt=Date.now();
+      await ledger.recordOpen({contract_id:contractId,symbol,stake,action:signal.action,score:signal.score,source:"tick-autonomous",engine:signal.engine,marketProfile:signal.marketProfile});
+      await persistRisk();await deriv.watchContract(contractId);
+      console.log("DIABLO tick-scalp order",mode,symbol,signal.action,signal.score,signal.marketProfile,contractId);
+      state.ticks=[]; // require a fresh sequence before another entry
+    }catch(error){console.error("Tick entry failed",symbol,error.message);}
+    finally{state.evaluating=false;}
   };
-  runCycle();
-  return json(res,200,{started:true,mode,accountId,markets:autoRunner.markets,intervalMs:config.scanIntervalMs,warning:mode==="real"?"REAL MONEY: losses are possible.": "Demo account."});
+  try{
+    const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
+    for(const symbol of autoRunner.markets){
+      if(stopped)break;
+      if(!available.has(symbol)){console.warn("Selected market unavailable:",symbol);continue;}
+      // Prime a market baseline before accepting tick entries.
+      const history=await deriv.history(symbol,100,config.autoGranularity);
+      const closed=history.length>1?history.slice(0,-1):[];
+      const candleContext=analyzeCandles(closed,{minScore:config.minSignalScore});
+      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
+      const sub=await deriv.subscribeTicks(symbol,tick=>{evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
+      autoRunner.subscriptions.push(sub);
+      console.log("DIABLO tick feed subscribed",symbol,"baseline",candleContext.action);
+    }
+    if(!autoRunner.subscriptions.length)throw Error("No selected markets could be subscribed; autonomous scanner was not started");
+  }catch(error){
+    stopped=true;for(const sub of autoRunner.subscriptions)await deriv.unsubscribeTicks(sub.id).catch(()=>{});
+    autoRunner=null;guard.emergencyStop();await persistRisk();
+    return json(res,502,{error:"Could not initialize continuous tick feeds: "+error.message});
+  }
+  return json(res,200,{started:true,mode,accountId,markets:autoRunner.markets,engine:"continuous-tick",subscriptions:autoRunner.subscriptions.length,warning:mode==="real"?"REAL MONEY: losses are possible.": "Demo account."});
 }
 if(req.method==="POST"&&req.url==="/api/automation/stop"){
   if(autoRunner)autoRunner.stop();autoRunner=null;guard.emergencyStop();await persistRisk();
   return json(res,200,{stopped:true,note:"New autonomous entries stopped. Existing positions remain open and settlement monitoring continues while connected."});
 }
-if(req.method==="GET"&&req.url==="/api/automation/status")return json(res,200,{running:Boolean(autoRunner),runner:autoRunner?{mode:autoRunner.mode,accountId:autoRunner.accountId,markets:autoRunner.markets,startedAt:autoRunner.startedAt}:null,connected:deriv.connected,risk:guard.snapshot()});
+if(req.method==="GET"&&req.url==="/api/automation/status")return json(res,200,{running:Boolean(autoRunner),runner:autoRunner?{mode:autoRunner.mode,accountId:autoRunner.accountId,markets:autoRunner.markets,startedAt:autoRunner.startedAt,engine:"continuous-tick",subscriptions:autoRunner.subscriptions.length,tickState:Object.fromEntries(Object.entries(autoRunner.tickState).map(([k,v])=>[k,{ticks:v.ticks.length,lastSignal:v.lastSignal}]))}:null,connected:deriv.connected,risk:guard.snapshot()});
 if(req.method==="GET"&&req.url==="/api/status")return json(res,200,{name:"DIABLO DERIV AUTO TRADER",engine:config.engine,mode:config.mode,autoTradeConfigured:config.autoTrade,credentialsConfigured:deriv.credentialsReady(),connected:deriv.connected,account:activeAccount,risk:guard.snapshot(),capabilities:{marketData:true,analysis:true,proposal:deriv.connected,manualDemoBuy:deriv.connected,batchScanAndExecute:deriv.connected&&config.autoTrade,settlementStream:deriv.connected,realMoney:config.liveTradingAck,mt5:"desktop-terminal-only"}});
 if(req.method==="GET"&&req.url==="/api/ledger")return json(res,200,{ledger:ledger.snapshot()});
 if(req.method==="GET"&&req.url==="/api/accounts"){try{return json(res,200,{accounts:await deriv.accounts()});}catch(e){return json(res,400,{error:e.message});}}
