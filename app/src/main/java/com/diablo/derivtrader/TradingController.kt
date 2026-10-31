@@ -88,7 +88,7 @@ class TradingController(
     private val receivedTickCounts = hashMapOf<String, Long>()
     private val lastTickWallMillis = hashMapOf<String, Long>()
     private val lastDiagnosticAtMillis = hashMapOf<String, Long>()
-    private val requiredClosedCandles = 23
+    private val requiredClosedCandles = 35
 
     @Synchronized fun start(selectedSymbol: String, accountCurrency: String = config.currency) =
         start(listOf(selectedSymbol), accountCurrency)
