@@ -26,6 +26,7 @@ data class TraderConfig(
     val maxTradesPerMarket: Int = 1,
     val stakeProgressionEnabled: Boolean = false,
     val stakeProgression: List<Double> = listOf(1.0, 2.0, 3.0, 4.0, 5.0),
+    val initialProgressionIndex: Int = 0,
     val marketTradeLimits: Map<String, Int> = emptyMap()
 )
 
@@ -37,7 +38,8 @@ data class TradeRecord(
     val exitPrice: Double,
     val profit: Double,
     val status: String,
-    val detail: String
+    val detail: String,
+    val progressionIndex: Int = 0
 )
 
 private data class OpenPosition(
@@ -81,7 +83,7 @@ class TradingController(
     private var realizedPnl = config.initialRealizedPnl
     private var consecutiveLosses = config.initialConsecutiveLosses
     private var tradesToday = config.initialTradesToday
-    private var progressionIndex = 0
+    private var progressionIndex = config.initialProgressionIndex.coerceIn(0, config.stakeProgression.lastIndex.coerceAtLeast(0))
     private var emergencyStop = false
     private var watchdog: ScheduledExecutorService? = null
     private val staleMarkets = hashSetOf<String>()
@@ -325,7 +327,7 @@ class TradingController(
                 onTrade(TradeRecord(id, position.symbol, direction,
                     contract.optDouble("buy_price", position.buyPrice),
                     contract.optDouble("sell_price", contract.optDouble("bid_price", 0.0)),
-                    profit, "CLOSED", contract.optString("status")))
+                    profit, "CLOSED", contract.optString("status"), progressionIndex))
                 val nextStake = if (config.stakeProgressionEnabled)
                     config.stakeProgression[progressionIndex.coerceIn(0, config.stakeProgression.lastIndex)]
                 else config.stake
