@@ -71,3 +71,29 @@ test("BOOM/CRASH do not predict spikes when no characteristic impulse occurred",
   assert.equal(analyzeTickMomentum(ticks,"BOOM1000").action,"WAIT");
   assert.equal(analyzeTickMomentum(ticks,"CRASH1000").action,"WAIT");
 });
+
+
+import { confirmPrecisionEntry } from "../src/strategy.js";
+
+test("DIABLO 90 requires candle direction agreement on regular indices",()=>{
+  const tick={action:"UP",score:84,engine:"TICK_FAST",marketProfile:"MOMENTUM"};
+  const aligned={action:"UP",score:80,regime:"TRENDING",volatility:"NORMAL"};
+  const conflict={action:"DOWN",score:90,regime:"TRENDING",volatility:"NORMAL"};
+  assert.equal(confirmPrecisionEntry(tick,aligned,"R_100").action,"UP");
+  assert.equal(confirmPrecisionEntry(tick,conflict,"R_100").action,"WAIT");
+});
+
+test("DIABLO 90 accepts observed BOOM spike with non-conflicting candle context",()=>{
+  const tick={action:"UP",score:76,engine:"TICK_FAST",marketProfile:"BOOM_SPIKE"};
+  const context={action:"WAIT",score:0,regime:"MIXED",volatility:"NORMAL"};
+  const result=confirmPrecisionEntry(tick,context,"BOOM1000",{minScore:70});
+  assert.equal(result.action,"UP");
+  assert.equal(result.engine,"DIABLO_90");
+  assert.equal(result.score,74);
+});
+
+test("DIABLO 90 blocks extreme volatility and directional conflicts",()=>{
+  const tick={action:"DOWN",score:88};
+  assert.equal(confirmPrecisionEntry(tick,{action:"DOWN",score:90,volatility:"HIGH"},"R_100").action,"WAIT");
+  assert.equal(confirmPrecisionEntry(tick,{action:"UP",score:90,volatility:"NORMAL"},"CRASH1000").action,"WAIT");
+});
