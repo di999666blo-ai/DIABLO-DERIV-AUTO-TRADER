@@ -141,7 +141,7 @@ export function analyzeTickMomentum(ticks,symbol="",options={}){
     const held=follow.every(x=>Math.sign(x)===expected||x===0);
     // Compare the current quote with the quote immediately after the spike.
     // The previous index formula anchored before the spike and missed retraces.
-    const postSpikeIndex=rows.length-tail.length+spikeIndex;
+    const postSpikeIndex=rows.length-tail.length+spikeIndex+1;
     const postSpikeQuote=rows[postSpikeIndex]?.quote;
     if(!Number.isFinite(postSpikeQuote))return {...base,reason:"Spike reference price unavailable",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     const netAfter=rows.at(-1).quote-postSpikeQuote;
@@ -187,6 +187,13 @@ export function confirmPrecisionEntry(tickSignal, candleSignal, symbol = "", opt
   }
   if (!candleSignal || !Number.isFinite(Number(candleSignal.score))) {
     return { ...base, reason: "Fresh candle context is unavailable" };
+  }
+  // A WAIT from a fully evaluated candle sample can be a valid context filter.
+  // A warm-up WAIT is not evidence: never allow a tick-only entry through it.
+  const candleCount = Number(candleSignal.candleCount);
+  if (!Number.isFinite(candleCount) || candleCount < 35 ||
+      !["LOW", "NORMAL", "HIGH"].includes(candleSignal.volatility)) {
+    return { ...base, reason: "Insufficient closed-candle context; collecting more candles" };
   }
 
   const upper = String(symbol).toUpperCase();
