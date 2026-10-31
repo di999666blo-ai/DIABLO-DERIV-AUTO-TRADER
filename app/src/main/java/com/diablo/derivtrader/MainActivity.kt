@@ -642,6 +642,56 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        val backtestView = TextView(this).apply {
+            text = "HISTORICAL BACKTEST: Not run yet."
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(white)
+            background = rounded(0xFF08111F.toInt(), 0xFF1E345A.toInt(), 12f)
+            setPadding(12, 12, 12, 12)
+        }
+        chartsInfo.addView(backtestView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10 })
+        action(chartsInfo, "RUN 500-CANDLE WALK-FORWARD BACKTEST") {
+            val symbol = selectedSymbol()
+            if (symbol == null) {
+                backtestView.text = "Select a Deriv market in Market Scanner first."
+            } else if (!api.connected) {
+                backtestView.text = "Connect the Deriv Demo account first."
+            } else {
+                val period = chartPeriods.getOrNull(chartTimeframe.selectedItemPosition) ?: chartPeriods.first()
+                backtestView.text = "Downloading up to 500 historical candles for $symbol..."
+                api.candleHistory(symbol, period.second, 500) { result ->
+                    runOnUiThread {
+                        result.onSuccess { response ->
+                            val rows = response.optJSONArray("candles")
+                            if (rows == null) {
+                                backtestView.text = "Deriv returned no candle array. Backtest not run."
+                            } else {
+                                val candles = (0 until rows.length()).mapNotNull { index ->
+                                    val row = rows.optJSONObject(index) ?: return@mapNotNull null
+                                    MarketCandle(
+                                        row.optLong("epoch"),
+                                        row.optDouble("open", Double.NaN),
+                                        row.optDouble("high", Double.NaN),
+                                        row.optDouble("low", Double.NaN),
+                                        row.optDouble("close", Double.NaN)
+                                    )
+                                }
+                                val metrics = HistoricalBacktest().run(candles)
+                                backtestView.text = buildString {
+                                    append("CANDLE-ONLY WALK-FORWARD REPLAY\n")
+                                    append("Market: $symbol  |  Timeframe: ${period.first}\n")
+                                    append("Candles: ${metrics.candlesProcessed}  |  Trades: ${metrics.trades}\n")
+                                    append("Wins: ${metrics.wins}  |  Losses: ${metrics.losses}  |  Skipped: ${metrics.skipped}\n")
+                                    append("Historical directional hit rate: ${String.format(java.util.Locale.US, "%.1f", metrics.winRatePercent)}%\n\n")
+                                    append("Research estimate only. It uses closed candles and next-candle direction; it does NOT simulate live tick confirmation, Deriv fills, payouts, latency, slippage or contract settlement. It is not a live win-rate guarantee.")
+                                }
+                            }
+                        }.onFailure { backtestView.text = "Historical backtest failed: ${it.message}" }
+                    }
+                }
+            }
+        }
         activePage = "guide"
         val guide = section("HOW TO START SAFELY", "Follow these steps in order")
         listOf(
