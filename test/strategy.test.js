@@ -132,3 +132,30 @@ test("BOOM spike retracement after the impulse is measured from the post-spike q
   assert.equal(result.action,"WAIT");
   assert.match(result.reason,/follow-through|stand aside/i);
 });
+
+
+import { walkForwardBacktest } from "../src/backtest.js";
+
+test("walk-forward backtest reports no trades when warmup data is insufficient",()=>{
+  const rows=Array.from({length:20},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  const result=walkForwardBacktest(rows);
+  assert.equal(result.method,"WALK_FORWARD_NO_LOOKAHEAD");
+  assert.equal(result.totalTrades,0);
+  assert.equal(result.winRate,null);
+  assert.match(result.warning,/Small sample/);
+});
+
+test("walk-forward backtest validates payout assumptions",()=>{
+  const rows=Array.from({length:50},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  assert.throws(()=>walkForwardBacktest(rows,{payoutRate:1}),/payoutRate/);
+  assert.throws(()=>walkForwardBacktest(rows,{payoutRate:0}),/payoutRate/);
+});
+
+test("walk-forward backtest returns internally consistent statistics",()=>{
+  const rows=Array.from({length:120},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  const result=walkForwardBacktest(rows,{expiryBars:1,payoutRate:.85});
+  assert.equal(result.candles,120);
+  assert.equal(result.wins+result.losses+result.pushes,result.totalTrades);
+  if(result.winRate!==null)assert.ok(result.winRate>=0&&result.winRate<=100);
+  assert.ok(Number.isFinite(result.netR));
+});
