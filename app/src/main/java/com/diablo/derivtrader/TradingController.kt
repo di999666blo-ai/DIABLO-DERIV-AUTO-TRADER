@@ -65,6 +65,7 @@ class TradingController(
     private val builders = hashMapOf<String, TickCandleBuilder>()
     private val candleHistory = hashMapOf<String, ArrayList<MarketCandle>>()
     private val seenSignals = hashMapOf<String, MutableSet<Long>>()
+    private val tickHistory = hashMapOf<String, ArrayList<MarketTick>>()
     private val pendingSymbols = linkedSetOf<String>()
     private val positions = linkedMapOf<Long, OpenPosition>()
     private val marketTradeCounts = hashMapOf<String, Int>()
@@ -108,13 +109,14 @@ class TradingController(
             onStatus("Invalid position, per-market quantity or stake progression settings. Trading blocked."); return
         }
         activeSymbols.clear(); activeSymbols.addAll(requested)
-        subscriptions.clear(); builders.clear(); candleHistory.clear(); seenSignals.clear()
+        subscriptions.clear(); builders.clear(); candleHistory.clear(); seenSignals.clear(); tickHistory.clear()
         receivedTickCounts.clear(); lastTickWallMillis.clear(); lastDiagnosticAtMillis.clear()
         pendingSymbols.clear(); marketTradeCounts.clear()
         requested.forEach { symbol ->
             builders[symbol] = TickCandleBuilder(config.candleSeconds)
             candleHistory[symbol] = arrayListOf()
             seenSignals[symbol] = hashSetOf()
+            tickHistory[symbol] = arrayListOf()
             marketTradeCounts[symbol] = 0
         }
         currency = accountCurrency
@@ -193,7 +195,15 @@ class TradingController(
         }
         val quote = tick.optDouble("quote", Double.NaN)
         val epoch = tick.optLong("epoch", 0L)
-        val candle = builders[symbol]?.onTick(MarketTick(epoch, quote))
+        val marketTick = MarketTick(epoch, quote)
+        synchronized(this) {
+            val samples = tickHistory[symbol] ?: arrayListOf<MarketTick>().also { tickHistory[symbol] = it }
+            if (quote.isFinite() && quote > 0.0 && (samples.isEmpty() || samples.last() != marketTick)) {
+                samples.add(marketTick)
+                while (samples.size > 64) samples.removeAt(0)
+            }
+        }
+        val candle = builders[symbol]?.onTick(marketTick)
         if (candle == null) {
             synchronized(this) {
                 val lastDiagnostic = lastDiagnosticAtMillis[symbol] ?: 0L
@@ -209,10 +219,13 @@ class TradingController(
             if (symbol in staleMarkets) return
             val candles = candleHistory[symbol] ?: return
             candles.add(candle); if (candles.size > 300) candles.removeAt(0)
-            val signal = engine.evaluate(candles.toList())
+            val candleSignal = engine.evaluate(candles.toList())
+            val tickSamples = tickHistory[symbol]?.toList().orEmpty()
+            val precision = PrecisionEntryEngine().evaluate(tickSamples, candles.toList(), symbol, candleSignal)
             val lastTickAge = ((System.currentTimeMillis() - (lastTickWallMillis[symbol] ?: System.currentTimeMillis())) / 1000L).coerceAtLeast(0L)
-            onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | candles ${candles.size}/$requiredClosedCandles | ticks ${receivedTickCounts[symbol] ?: 0L} | last tick ${lastTickAge}s | ${signal.reason}")
-            if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
+            onStatus("$symbol | ${precision.direction} | DIABLO 90 setup ${precision.score}/100 | tick ${precision.tickScore} | candle ${precision.candleScore} | ${precision.volatility}/${precision.regime} | candles ${candles.size}/$requiredClosedCandles | ticks ${receivedTickCounts[symbol] ?: 0L} | last tick ${lastTickAge}s | ${precision.reason}")
+            if (precision.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(candleSignal.candleEpoch) != true) return
+            val signal = TradeSignal(precision.direction, precision.score, precision.reason, candleSignal.candleEpoch)
             if (!running.get() || symbol in pendingSymbols || positions.values.any { it.symbol == symbol }) return
             val pairLimit = config.marketTradeLimits[symbol] ?: config.maxTradesPerMarket
             if (pairLimit !in 1..100 || (marketTradeCounts[symbol] ?: 0) >= pairLimit) {

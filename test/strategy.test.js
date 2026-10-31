@@ -71,3 +71,91 @@ test("BOOM/CRASH do not predict spikes when no characteristic impulse occurred",
   assert.equal(analyzeTickMomentum(ticks,"BOOM1000").action,"WAIT");
   assert.equal(analyzeTickMomentum(ticks,"CRASH1000").action,"WAIT");
 });
+
+
+import { confirmPrecisionEntry } from "../src/strategy.js";
+
+test("DIABLO 90 requires candle direction agreement on regular indices",()=>{
+  const tick={action:"UP",score:84,engine:"TICK_FAST",marketProfile:"MOMENTUM"};
+  const aligned={action:"UP",score:80,regime:"TRENDING",volatility:"NORMAL",candleCount:50};
+  const conflict={action:"DOWN",score:90,regime:"TRENDING",volatility:"NORMAL",candleCount:50};
+  assert.equal(confirmPrecisionEntry(tick,aligned,"R_100").action,"UP");
+  assert.equal(confirmPrecisionEntry(tick,conflict,"R_100").action,"WAIT");
+});
+
+test("DIABLO 90 accepts observed BOOM spike with non-conflicting candle context",()=>{
+  const tick={action:"UP",score:76,engine:"TICK_FAST",marketProfile:"BOOM_SPIKE"};
+  const context={action:"WAIT",score:0,regime:"MIXED",volatility:"NORMAL",candleCount:50};
+  const result=confirmPrecisionEntry(tick,context,"BOOM1000",{minScore:70});
+  assert.equal(result.action,"UP");
+  assert.equal(result.engine,"DIABLO_90");
+  assert.equal(result.score,73);
+});
+
+test("DIABLO 90 blocks extreme volatility and directional conflicts",()=>{
+  const tick={action:"DOWN",score:88};
+  assert.equal(confirmPrecisionEntry(tick,{action:"DOWN",score:90,volatility:"HIGH",candleCount:50},"R_100").action,"WAIT");
+  assert.equal(confirmPrecisionEntry(tick,{action:"UP",score:90,volatility:"NORMAL",candleCount:50},"CRASH1000").action,"WAIT");
+});
+
+
+test("BOOM spike retracement after follow-through is rejected",()=>{
+  const quotes=[100,100.01,100.00,100.02,100.01,100.03,100.02,100.04,100.03,100.05,100.04,100.06,100.56,100.61,100.66,100.36];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch})),"BOOM1000");
+  assert.equal(result.action,"WAIT");
+  assert.match(result.reason,/follow-through|stand aside/i);
+});
+
+test("closed-candle volatility filter adapts to a sudden range expansion",()=>{
+  const rows=candles(50);
+  for(let i=36;i<50;i++){
+    const close=rows[i].close,open=rows[i].open;
+    rows[i]={...rows[i],high:Math.max(open,close)+1.5,low:Math.min(open,close)-1.5};
+  }
+  const result=analyzeCandles(rows);
+  assert.equal(result.action,"WAIT");
+  assert.equal(result.volatility,"HIGH");
+  assert.match(result.reason,/Volatility spike/);
+});
+
+
+test("BOOM spike is blocked until a full closed-candle context exists",()=>{
+  const tick={action:"UP",score:76,marketProfile:"BOOM_SPIKE"};
+  const warmup={action:"WAIT",score:0,reason:"Insufficient closed candles",candleCount:20};
+  assert.equal(confirmPrecisionEntry(tick,warmup,"BOOM1000").action,"WAIT");
+  assert.match(confirmPrecisionEntry(tick,warmup,"BOOM1000").reason,/Insufficient closed-candle context/);
+});
+
+test("BOOM spike retracement after the impulse is measured from the post-spike quote",()=>{
+  const quotes=[100,100.01,100.00,100.02,100.01,100.03,100.02,100.04,100.03,100.05,100.04,100.06,100.56,100.61,100.66,100.36];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch})),"BOOM1000");
+  assert.equal(result.action,"WAIT");
+  assert.match(result.reason,/follow-through|stand aside/i);
+});
+
+
+import { walkForwardBacktest } from "../src/backtest.js";
+
+test("walk-forward backtest reports no trades when warmup data is insufficient",()=>{
+  const rows=Array.from({length:20},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  const result=walkForwardBacktest(rows);
+  assert.equal(result.method,"WALK_FORWARD_NO_LOOKAHEAD");
+  assert.equal(result.totalTrades,0);
+  assert.equal(result.winRate,null);
+  assert.match(result.warning,/Small sample/);
+});
+
+test("walk-forward backtest validates payout assumptions",()=>{
+  const rows=Array.from({length:50},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  assert.throws(()=>walkForwardBacktest(rows,{payoutRate:1}),/payoutRate/);
+  assert.throws(()=>walkForwardBacktest(rows,{payoutRate:0}),/payoutRate/);
+});
+
+test("walk-forward backtest returns internally consistent statistics",()=>{
+  const rows=Array.from({length:120},(_,i)=>({epoch:i*60,open:100+i*.1,high:100+i*.1+.03,low:100+i*.1-.03,close:100+i*.1+.01}));
+  const result=walkForwardBacktest(rows,{expiryBars:1,payoutRate:.85});
+  assert.equal(result.candles,120);
+  assert.equal(result.wins+result.losses+result.pushes,result.totalTrades);
+  if(result.winRate!==null)assert.ok(result.winRate>=0&&result.winRate<=100);
+  assert.ok(Number.isFinite(result.netR));
+});
