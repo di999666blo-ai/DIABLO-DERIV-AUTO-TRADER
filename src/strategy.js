@@ -136,3 +136,69 @@ export function analyzeTickMomentum(ticks,symbol="",options={}){
   const action=score>=minScore?direction:"WAIT";
   return {action,score,reason:action==="WAIT"?"Tick setup below quality threshold":reason,tickCount:rows.length,engine:"TICK_FAST",marketProfile:boom?"BOOM_SPIKE":crash?"CRASH_SPIKE":"MOMENTUM",note:"Tick score is setup quality, not a probability of profit."};
 }
+
+
+/**
+ * DIABLO 90 precision gate.
+ * Combines a live tick candidate with a fresh closed-candle context.
+ * Scores are setup-alignment points, never win probabilities.
+ */
+export function confirmPrecisionEntry(tickSignal, candleSignal, symbol = "", options = {}) {
+  const minimum = clamp(Number(options.minScore ?? 72), 60, 95);
+  const base = {
+    action: "WAIT",
+    score: 0,
+    engine: "DIABLO_90",
+    reason: "Waiting for independent tick and candle confirmation",
+    components: {
+      tick: Number(tickSignal?.score) || 0,
+      candle: Number(candleSignal?.score) || 0
+    }
+  };
+  if (!tickSignal || !["UP", "DOWN"].includes(tickSignal.action)) {
+    return { ...base, reason: tickSignal?.reason || base.reason };
+  }
+  if (!candleSignal || !Number.isFinite(Number(candleSignal.score))) {
+    return { ...base, reason: "Fresh candle context is unavailable" };
+  }
+
+  const upper = String(symbol).toUpperCase();
+  const spikeMarket = upper.startsWith("BOOM") || upper.startsWith("CRASH");
+  if (candleSignal.volatility === "HIGH") {
+    return { ...base, reason: "Candle volatility filter blocked entry", volatility: "HIGH" };
+  }
+  if (candleSignal.action !== "WAIT" && candleSignal.action !== tickSignal.action) {
+    return { ...base, reason: "Tick and candle directions conflict" };
+  }
+
+  // Regular indices require directional candle agreement. BOOM/CRASH use
+  // observed spike + follow-through as their trigger; candles act as a
+  // volatility/conflict filter rather than forcing a trend-following entry.
+  if (!spikeMarket && candleSignal.action !== tickSignal.action) {
+    return { ...base, reason: "Waiting for candle trend/momentum agreement" };
+  }
+  if (spikeMarket && candleSignal.action === "WAIT" && candleSignal.regime === "RANGING") {
+    return { ...base, reason: "Market structure is ranging after spike; stand aside" };
+  }
+
+  const candleWeight = spikeMarket ? 0.20 : 0.40;
+  const tickWeight = 1 - candleWeight;
+  const score = Math.round(tickSignal.score * tickWeight + candleSignal.score * candleWeight);
+  const action = score >= minimum ? tickSignal.action : "WAIT";
+  return {
+    action,
+    score,
+    engine: "DIABLO_90",
+    marketProfile: tickSignal.marketProfile || (spikeMarket ? (upper.startsWith("BOOM") ? "BOOM_SPIKE" : "CRASH_SPIKE") : "TREND_MOMENTUM"),
+    reason: action === "WAIT" ? "Combined setup score is below the configured threshold" : "Tick trigger and fresh candle context confirmed",
+    components: {
+      tick: tickSignal.score,
+      candle: candleSignal.score,
+      tickWeight,
+      candleWeight
+    },
+    regime: candleSignal.regime || "UNKNOWN",
+    volatility: candleSignal.volatility || "UNKNOWN",
+    note: "DIABLO 90 score measures setup alignment, not probability of profit."
+  };
+}
