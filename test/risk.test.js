@@ -49,3 +49,36 @@ test("disabled progression always restores the configured base stake",()=>{
   assert.equal(g.progressionIndex,0);
   assert.equal(g.currentStake,2);
 });
+
+test("midnight rollover resets daily counters but preserves open contract exposure",()=>{
+  const g=new RiskGuard({maxOpenTrades:2,maxTradesPerMarket:1,cooldownMs:0});
+  g.arm();
+  g.recordTrade({symbol:"frxEURUSD"});
+  const yesterday=new Date(Date.now()-86400000);
+  g.day=g.dayKey(yesterday);
+  g.trades=9;g.loss=4;g.consecutiveLosses=2;
+  g.rollover(new Date());
+  assert.equal(g.trades,0);
+  assert.equal(g.loss,0);
+  assert.equal(g.consecutiveLosses,0);
+  assert.equal(g.openTrades,1);
+  assert.equal(g.openByMarket.frxEURUSD,1);
+  assert.equal(g.canTrade({autoTrade:true,mode:"demo",symbol:"frxGBPUSD",ignoreCooldown:true}).reason,"Account-wide open-trade limit reached");
+});
+
+test("restore from yesterday clears daily counters but keeps unsettled positions",()=>{
+  const g=new RiskGuard({maxOpenTrades:2,maxTradesPerMarket:1,cooldownMs:0});
+  g.restore({
+    day:g.dayKey(new Date(Date.now()-86400000)),
+    stopped:false,trades:12,dailyLoss:8,consecutiveLosses:3,lastTradeAt:123,
+    openTrades:1,openByMarket:{frxEURUSD:1}
+  });
+  assert.equal(g.trades,0);
+  assert.equal(g.loss,0);
+  assert.equal(g.consecutiveLosses,0);
+  assert.equal(g.lastTradeAt,0);
+  assert.equal(g.openTrades,1);
+  assert.equal(g.openByMarket.frxEURUSD,1);
+  g.arm();
+  assert.equal(g.canTrade({autoTrade:true,mode:"demo",symbol:"frxGBPUSD",ignoreCooldown:true}).reason,"Account-wide open-trade limit reached");
+});
