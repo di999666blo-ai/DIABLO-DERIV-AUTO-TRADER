@@ -1,7 +1,7 @@
 name: Android APK
 on:
   push:
-    branches: [main]
+    branches: [main, feature/android-diablo90-integration]
   workflow_dispatch:
 concurrency:
   group: android-apk-${{ github.ref }}
