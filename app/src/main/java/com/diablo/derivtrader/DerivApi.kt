@@ -6,13 +6,43 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
 
 class DerivApi {
     private val http = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).build()
     private val publicHttp = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build()
     private var ws: WebSocket? = null
     private var reqId = 1
-    private val pending = mutableMapOf<Int, (Result<JSONObject>) -> Unit>()
+    private data class PendingRequest(
+        val callback: (Result<JSONObject>) -> Unit,
+        var timeout: ScheduledFuture<*>? = null
+    )
+    private val pending = mutableMapOf<Int, PendingRequest>()
+    private val pendingLock = Any()
+    private val requestTimer = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "deriv-request-timeouts").apply { isDaemon = true }
+    }
+    private val requestTimeoutSeconds = 15L
+
+    private fun completePending(id: Int, result: Result<JSONObject>) {
+        val item = synchronized(pendingLock) {
+            pending.remove(id)?.also { it.timeout?.cancel(false) }
+        }
+        item?.callback?.invoke(result)
+    }
+
+    private fun failAllPending(message: String) {
+        val callbacks = synchronized(pendingLock) {
+            val items = pending.values.toList()
+            pending.clear()
+            items.forEach { it.timeout?.cancel(false) }
+            items
+        }
+        callbacks.forEach { item ->
+            try { item.callback(Result.failure(Exception(message))) } catch (_: Exception) { }
+        }
+    }
     @Volatile var connected = false
         private set
     @Volatile var connectedMode: String? = null
@@ -74,23 +104,21 @@ class DerivApi {
                                 try {
                                     val message = JSONObject(text)
                                     val id = message.optInt("req_id", -1)
-                                    synchronized(pending) {
-                                        pending.remove(id)?.invoke(
-                                            when {
-                                                message.has("error") -> Result.failure(
-                                                    Exception(message.optJSONObject("error")?.optString("message") ?: "Deriv error")
-                                                )
-                                                message.optJSONArray("errors")?.length()?.let { it > 0 } == true -> {
-                                                    val errors = message.optJSONArray("errors")!!
-                                                    val details = (0 until errors.length()).mapNotNull { index ->
-                                                        errors.optJSONObject(index)?.optString("message")?.takeIf { it.isNotBlank() }
-                                                    }.joinToString("; ")
-                                                    Result.failure(Exception(details.ifBlank { "Deriv rejected the request" }))
-                                                }
-                                                else -> Result.success(message)
+                                    completePending(id,
+                                        when {
+                                            message.has("error") -> Result.failure(
+                                                Exception(message.optJSONObject("error")?.optString("message") ?: "Deriv error")
+                                            )
+                                            message.optJSONArray("errors")?.length()?.let { it > 0 } == true -> {
+                                                val errors = message.optJSONArray("errors")!!
+                                                val details = (0 until errors.length()).mapNotNull { index ->
+                                                    errors.optJSONObject(index)?.optString("message")?.takeIf { it.isNotBlank() }
+                                                }.joinToString("; ")
+                                                Result.failure(Exception(details.ifBlank { "Deriv rejected the request" }))
                                             }
-                                        )
-                                    }
+                                            else -> Result.success(message)
+                                        }
+                                    )
                                     onUpdate?.invoke(message)
                                 } catch (_: Exception) { }
                             }
@@ -100,6 +128,7 @@ class DerivApi {
                                 connectedMode = null
                                 val message = "Deriv WebSocket closed: $code ${reason.ifBlank { "(no reason supplied)" }}"
                                 finishConnection(Result.failure(Exception(message)))
+                                failAllPending(message)
                                 if (code != 1000) onUpdate?.invoke(JSONObject().put("connection_error", message))
                             }
                             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -109,6 +138,7 @@ class DerivApi {
                                 val httpDetail = response?.let { " (HTTP ${it.code})" }.orEmpty()
                                 val message = "Deriv WebSocket failed$httpDetail: ${t.message ?: "network or handshake error"}"
                                 finishConnection(Result.failure(Exception(message)))
+                                failAllPending(message)
                                 onUpdate?.invoke(JSONObject().put("connection_error", message))
                             }
                         })
@@ -127,14 +157,19 @@ class DerivApi {
             return
         }
         val id: Int
-        synchronized(pending) {
+        synchronized(pendingLock) {
             id = reqId++
             data.put("req_id", id)
-            pending[id] = done
+            val item = PendingRequest(done)
+            pending[id] = item
+            item.timeout = requestTimer.schedule({
+                completePending(id, Result.failure(Exception(
+                    "Deriv request timed out after ${requestTimeoutSeconds}s. Check the connection and try again."
+                )))
+            }, requestTimeoutSeconds, TimeUnit.SECONDS)
         }
         if (!socket.send(data.toString())) {
-            synchronized(pending) { pending.remove(id) }
-            done(Result.failure(Exception("WebSocket send failed")))
+            completePending(id, Result.failure(Exception("WebSocket send failed")))
         }
     }
 
@@ -290,6 +325,6 @@ class DerivApi {
         connectedMode = null
         ws?.close(1000, "App stopped")
         ws = null
-        synchronized(pending) { pending.clear() }
+        failAllPending("Deriv connection closed by the app")
     }
 }
