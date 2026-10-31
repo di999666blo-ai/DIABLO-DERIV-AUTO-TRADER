@@ -313,7 +313,8 @@ class TradingController(
                 realizedPnl += profit
                 if (profit < 0.0) {
                     consecutiveLosses++
-                    progressionIndex = (progressionIndex - 1).coerceAtLeast(0)
+                    if (config.stakeProgressionEnabled)
+                        progressionIndex = (progressionIndex - 1).coerceAtLeast(0)
                 } else if (profit > 0.0) {
                     consecutiveLosses = 0
                     if (config.stakeProgressionEnabled)
