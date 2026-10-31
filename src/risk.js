@@ -1,10 +1,13 @@
 export class RiskGuard {
   constructor(limits = {}) {
     this.limits = { dailyLoss: 10, tradesPerDay: 100, consecutiveLosses: 3, cooldownMs: 120000, maxStake: 5, allowLive: false, maxOpenTrades: 1, maxTradesPerMarket: 1, baseStake: 1, stakeProgressionEnabled: false, stakeProgression: [1,2,3,4,5], ...limits };
+    if (!Number.isFinite(this.limits.maxStake) || this.limits.maxStake <= 0) throw new Error("maxStake must be a positive finite number");
+    if (!Number.isFinite(this.limits.baseStake) || this.limits.baseStake <= 0) throw new Error("baseStake must be a positive finite number");
     this.limits.stakeProgression = Array.isArray(this.limits.stakeProgression) && this.limits.stakeProgression.length
       ? this.limits.stakeProgression.map(Number) : [this.limits.baseStake];
     if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Invalid stake progression");
     this.limits.stakeProgression = this.limits.stakeProgression.map(x => Math.min(x, this.limits.maxStake));
+    if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Stake progression is invalid after applying maxStake");
     this.day = this.dayKey(); this.reset(); this.stopped = true;
     this.progressionIndex = 0;
     this.currentStake = this.limits.stakeProgressionEnabled ? this.limits.stakeProgression[0] : Math.min(this.limits.baseStake, this.limits.maxStake);
@@ -44,11 +47,13 @@ export class RiskGuard {
     this.day=saved.day||this.day;this.rollover();
     for(const k of ["trades","consecutiveLosses","lastTradeAt","openTrades"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);
     if(Number.isFinite(Number(saved.dailyLoss)))this.loss=Number(saved.dailyLoss);else if(Number.isFinite(Number(saved.loss)))this.loss=Number(saved.loss);
-    // Keep stake fixed at the configured base. Older saved progression values are ignored.
-    this.progressionIndex=Number.isInteger(saved.progressionIndex)?Math.max(0,Math.min(saved.progressionIndex,this.limits.stakeProgression.length-1)):0;
-    const restoredStake=Number(saved.currentStake);
-    this.currentStake=this.limits.stakeProgressionEnabled && Number.isFinite(restoredStake) && restoredStake>0
-      ? Math.min(restoredStake,this.limits.maxStake) : Math.min(this.limits.baseStake,this.limits.maxStake);
+    // The configured ladder is authoritative: restore the index, then derive the stake from it.
+    // This prevents a stale or edited currentStake value from bypassing the configured progression cap.
+    this.progressionIndex=this.limits.stakeProgressionEnabled && Number.isInteger(saved.progressionIndex)
+      ? Math.max(0,Math.min(saved.progressionIndex,this.limits.stakeProgression.length-1)) : 0;
+    this.currentStake=this.limits.stakeProgressionEnabled
+      ? this.limits.stakeProgression[this.progressionIndex]
+      : Math.min(this.limits.baseStake,this.limits.maxStake);
     if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;
     if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};
   }
