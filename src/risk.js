@@ -6,7 +6,8 @@ export class RiskGuard {
     this.limits.stakeProgression = Array.isArray(this.limits.stakeProgression) && this.limits.stakeProgression.length
       ? this.limits.stakeProgression.map(Number) : [this.limits.baseStake];
     if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Invalid stake progression");
-    this.limits.stakeProgression = this.limits.stakeProgression.map(x => Math.min(x, this.limits.maxStake));
+    // Remove duplicate rungs created when maxStake caps the configured ladder.
+    this.limits.stakeProgression = [...new Set(this.limits.stakeProgression.map(x => Math.min(x, this.limits.maxStake)))];
     if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Stake progression is invalid after applying maxStake");
     this.day = this.dayKey(); this.reset(); this.stopped = true;
     this.progressionIndex = 0;
