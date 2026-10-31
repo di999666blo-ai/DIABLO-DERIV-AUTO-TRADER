@@ -9,6 +9,7 @@ import {DerivClient} from "./deriv.js";
 import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
 import {walkForwardBacktest} from "./backtest.js";
+import {walkForwardBacktest} from "./backtest.js";
 
 const root=resolve(fileURLToPath(new URL("../public",import.meta.url)));
 const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,stakeProgressionEnabled:config.stakeProgressionEnabled,stakeProgression:config.stakeProgression,maxOpenTrades:config.maxOpenTrades,maxTradesPerMarket:config.maxTradesPerMarket,consecutiveLosses:config.maxConsecutiveLosses,allowLive:config.liveTradingAck});
@@ -129,6 +130,7 @@ if(req.method==="POST"&&req.url==="/api/disconnect"){deriv.close();activeAccount
 if(req.method==="GET"&&req.url==="/api/symbols"){const symbols=deriv.connected?await deriv.symbols():await deriv.publicSymbols();return json(res,200,{symbols});}
 if(req.method==="POST"&&req.url==="/api/history"){const b=await body(req);return json(res,200,{candles:await deriv.history(String(b.symbol||""),b.count,b.granularity)});}
 if(req.method==="POST"&&req.url==="/api/analyze"){const b=await body(req);return json(res,200,analyzeCandles(b.candles,b.options));}
+if(req.method==="POST"&&req.url==="/api/backtest"){const b=await body(req);const symbol=String(b.symbol||"");const count=Math.max(100,Math.min(500,Math.trunc(Number(b.count)||300)));const granularity=Number(b.granularity||60);const candles=await deriv.history(symbol,count,granularity);const closed=candles.length>1?candles.slice(0,-1):[];const result=walkForwardBacktest(closed,{expiryBars:b.expiryBars,payoutRate:b.payoutRate,minScore:config.minSignalScore});return json(res,200,{symbol,granularity,...result});}
 if(req.method==="POST"&&req.url==="/api/backtest"){
   const b=await body(req);
   if(!deriv.connected)return json(res,409,{error:"Connect a Deriv account before requesting historical candles"});
