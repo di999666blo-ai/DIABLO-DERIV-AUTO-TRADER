@@ -1,6 +1,10 @@
 export class RiskGuard {
   constructor(limits = {}) {
-    this.limits = { dailyLoss: 10, tradesPerDay: 100, consecutiveLosses: 3, cooldownMs: 120000, maxStake: 5, allowLive: false, maxOpenTrades: 1, maxTradesPerMarket: 1, baseStake: 1, ...limits };
+    this.limits = { dailyLoss: 10, tradesPerDay: 100, consecutiveLosses: 3, cooldownMs: 120000, maxStake: 5, allowLive: false, maxOpenTrades: 1, maxTradesPerMarket: 1, baseStake: 1, stakeProgressionEnabled: false, stakeProgression: [1,2,3,4,5], ...limits };
+    this.limits.stakeProgression = Array.isArray(this.limits.stakeProgression) && this.limits.stakeProgression.length
+      ? this.limits.stakeProgression.map(Number) : [this.limits.baseStake];
+    if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Invalid stake progression");
+    this.limits.stakeProgression = this.limits.stakeProgression.map(x => Math.min(x, this.limits.maxStake));
     this.day = this.dayKey(); this.reset(); this.stopped = true;
     this.currentStake = Math.min(this.limits.baseStake, this.limits.maxStake);
   }
@@ -12,8 +16,8 @@ export class RiskGuard {
     this.rollover();
     const p=Number(profit); if(!Number.isFinite(p)) return {recorded:false};
     this.openTrades=Math.max(0,this.openTrades-1); this.openByMarket[symbol]=Math.max(0,(this.openByMarket[symbol]||0)-1);
-    if(p<0){this.loss+=Math.abs(p);this.consecutiveLosses++;}
-    else if(p>0){this.consecutiveLosses=0;}
+    if(p<0){this.loss+=Math.abs(p);this.consecutiveLosses++;if(this.limits.stakeProgressionEnabled)this.currentStake=this.limits.stakeProgression[Math.max(0,this.progressionIndex-1)];this.progressionIndex=Math.max(0,(this.progressionIndex||0)-1);}
+    else if(p>0){this.consecutiveLosses=0;if(this.limits.stakeProgressionEnabled){this.progressionIndex=Math.min((this.progressionIndex||0)+1,this.limits.stakeProgression.length-1);this.currentStake=this.limits.stakeProgression[this.progressionIndex];}}
     if(this.loss>=this.limits.dailyLoss||this.consecutiveLosses>=this.limits.consecutiveLosses)this.emergencyStop();
     return {recorded:true,currentStake:this.currentStake,stopped:this.stopped};
   }
@@ -40,9 +44,12 @@ export class RiskGuard {
     for(const k of ["trades","consecutiveLosses","lastTradeAt","openTrades"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);
     if(Number.isFinite(Number(saved.dailyLoss)))this.loss=Number(saved.dailyLoss);else if(Number.isFinite(Number(saved.loss)))this.loss=Number(saved.loss);
     // Keep stake fixed at the configured base. Older saved progression values are ignored.
-    this.currentStake=Math.min(this.limits.baseStake,this.limits.maxStake);
+    this.progressionIndex=Number.isInteger(saved.progressionIndex)?Math.max(0,Math.min(saved.progressionIndex,this.limits.stakeProgression.length-1)):0;
+    const restoredStake=Number(saved.currentStake);
+    this.currentStake=this.limits.stakeProgressionEnabled && Number.isFinite(restoredStake) && restoredStake>0
+      ? Math.min(restoredStake,this.limits.maxStake) : Math.min(this.limits.baseStake,this.limits.maxStake);
     if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;
     if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};
   }
-  snapshot(){this.rollover();return{day:this.day,stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,openByMarket:{...this.openByMarket},limits:this.limits};}
+  snapshot(){this.rollover();return{day:this.day,stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,progressionIndex:this.progressionIndex||0,openByMarket:{...this.openByMarket},limits:this.limits};}
 }
