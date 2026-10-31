@@ -9,14 +9,21 @@ import { analyzeCandles } from "./strategy.js";
 export function walkForwardBacktest(candles, options = {}) {
   const rows = (candles || []).filter(c => c && [c.open,c.high,c.low,c.close].every(v => Number.isFinite(Number(v))))
     .map(c => ({epoch:Number(c.epoch ?? c.open_time ?? 0),open:Number(c.open),high:Number(c.high),low:Number(c.low),close:Number(c.close)}))
-    .filter(c => c.open > 0 && c.close > 0 && c.high >= Math.max(c.open,c.close,c.low) && c.low <= Math.min(c.open,c.close,c.high));
-  const expiryBars = Math.max(1,Math.min(50,Math.trunc(Number(options.expiryBars ?? 1))));
+    .filter(c => c.open > 0 && c.close > 0 && c.high >= Math.max(c.open,c.close,c.low) && c.low <= Math.min(c.open,c.close,c.high))
+    .sort((a,b)=>a.epoch-b.epoch);
+  const requestedExpiry=Number(options.expiryBars ?? 1);
+  if(!Number.isInteger(requestedExpiry)||requestedExpiry<1||requestedExpiry>50)throw new Error("expiryBars must be an integer from 1 to 50");
+  const expiryBars=requestedExpiry;
   const payoutRate = Number(options.payoutRate ?? 0.85);
   if (!Number.isFinite(payoutRate) || payoutRate <= 0 || payoutRate >= 1) {
     throw new Error("payoutRate must be greater than 0 and less than 1");
   }
-  const minCandles = Math.max(35,Math.trunc(Number(options.minCandles ?? 35)));
-  const minScore = Math.max(50,Math.min(95,Number(options.minScore ?? 72)));
+  const requestedWarmup=Number(options.minCandles ?? 35);
+  if(!Number.isInteger(requestedWarmup)||requestedWarmup<35||requestedWarmup>500)throw new Error("minCandles must be an integer from 35 to 500");
+  const minCandles=requestedWarmup;
+  const requestedScore=Number(options.minScore ?? 72);
+  if(!Number.isFinite(requestedScore))throw new Error("minScore must be a finite number");
+  const minScore=Math.max(50,Math.min(95,requestedScore));
   const trades = [];
   let nextAvailableIndex = minCandles - 1;
   for (let i = minCandles - 1; i + expiryBars < rows.length; i++) {
