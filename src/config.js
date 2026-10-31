@@ -22,6 +22,7 @@ export const config = Object.freeze({
   maxDailyLoss: num("MAX_DAILY_LOSS", 10),
   maxTradesPerDay: Math.trunc(num("MAX_TRADES_PER_DAY", 10)),
   maxOpenTrades: Math.trunc(num("MAX_OPEN_TRADES", 1)),
+  maxConsecutiveLosses: Math.trunc(num("MAX_CONSECUTIVE_LOSSES", 3)),
   maxTradesPerMarket: Math.trunc(num("MAX_OPEN_TRADES_PER_MARKET", 1)),
   maxConsecutiveLosses: Math.trunc(num("MAX_CONSECUTIVE_LOSSES", 3)),
   cooldownSeconds: Math.trunc(num("COOLDOWN_SECONDS", 120)),
