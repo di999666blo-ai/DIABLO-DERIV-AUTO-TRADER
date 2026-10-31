@@ -8,9 +8,10 @@ import {analyzeCandles,analyzeTickMomentum,confirmPrecisionEntry} from "./strate
 import {DerivClient} from "./deriv.js";
 import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
+import {walkForwardBacktest} from "./backtest.js";
 
 const root=resolve(fileURLToPath(new URL("../public",import.meta.url)));
-const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,stakeProgressionEnabled:config.stakeProgressionEnabled,stakeProgression:config.stakeProgression,maxOpenTrades:config.maxOpenTrades,maxTradesPerMarket:config.maxTradesPerMarket,allowLive:config.liveTradingAck});
+const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,stakeProgressionEnabled:config.stakeProgressionEnabled,stakeProgression:config.stakeProgression,maxOpenTrades:config.maxOpenTrades,maxTradesPerMarket:config.maxTradesPerMarket,consecutiveLosses:config.maxConsecutiveLosses,allowLive:config.liveTradingAck});
 const deriv=new DerivClient({token:config.apiToken,appId:config.appId});
 const ledger=new TradeLedger();
 let activeAccount=null;
@@ -48,7 +49,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
     const state=runner.tickState[symbol];if(!state)return;
     const quote=Number(tick.quote),epoch=Number(tick.epoch||0);if(!(quote>0))return;
     if(state.ticks.length&&epoch&&epoch===state.lastEpoch&&quote===state.lastQuote)return;
-    state.lastEpoch=epoch;state.lastQuote=quote;state.ticks.push({quote,epoch});if(state.ticks.length>40)state.ticks.shift();
+    state.lastEpoch=epoch;state.lastQuote=quote;state.lastTickAt=Date.now();state.ticks.push({quote,epoch});if(state.ticks.length>40)state.ticks.shift();
     if(state.evaluating||state.ticks.length<14)return;
     const tickSignal=analyzeTickMomentum(state.ticks,symbol,{minScore:config.minSignalScore});
     state.lastSignal=tickSignal;
@@ -60,8 +61,19 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
       // Deriv candle is still forming, so it is excluded before confirmation.
       const history=await deriv.history(symbol,100,config.autoGranularity);
       const closed=history.length>1?history.slice(0,-1):[];
+      if(Date.now()-state.lastTickAt>10000){
+        state.lastSignal={action:"WAIT",score:0,engine:"DIABLO_90",reason:"Tick feed became stale while candle confirmation was loading"};
+        return;
+      }
+      // Re-score the newest tick window after the async history request. Never
+      // buy using the older tick snapshot that originally triggered the fetch.
+      const latestTickSignal=analyzeTickMomentum(state.ticks,symbol,{minScore:config.minSignalScore});
+      if(!["UP","DOWN"].includes(latestTickSignal.action)||latestTickSignal.score<config.minSignalScore){
+        state.lastSignal=latestTickSignal;
+        return;
+      }
       const candleSignal=analyzeCandles(closed,{minScore:config.minSignalScore});
-      const signal=confirmPrecisionEntry(tickSignal,candleSignal,symbol,{minScore:config.minSignalScore});
+      const signal=confirmPrecisionEntry(latestTickSignal,candleSignal,symbol,{minScore:config.minSignalScore});
       state.lastSignal=signal;
       if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)return;
       const stake=guard.currentStake,gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
@@ -87,7 +99,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
       const history=await deriv.history(symbol,100,config.autoGranularity);
       const closed=history.length>1?history.slice(0,-1):[];
       const candleContext=analyzeCandles(closed,{minScore:config.minSignalScore});
-      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastQuote:null,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
+      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastQuote:null,lastTickAt:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
       const sub=await deriv.subscribeTicks(symbol,tick=>{evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
       autoRunner.subscriptions.push(sub);
       console.log("DIABLO tick feed subscribed",symbol,"baseline",candleContext.action);
@@ -117,6 +129,16 @@ if(req.method==="POST"&&req.url==="/api/disconnect"){deriv.close();activeAccount
 if(req.method==="GET"&&req.url==="/api/symbols"){const symbols=deriv.connected?await deriv.symbols():await deriv.publicSymbols();return json(res,200,{symbols});}
 if(req.method==="POST"&&req.url==="/api/history"){const b=await body(req);return json(res,200,{candles:await deriv.history(String(b.symbol||""),b.count,b.granularity)});}
 if(req.method==="POST"&&req.url==="/api/analyze"){const b=await body(req);return json(res,200,analyzeCandles(b.candles,b.options));}
+if(req.method==="POST"&&req.url==="/api/backtest"){
+  const b=await body(req);
+  if(!deriv.connected)return json(res,409,{error:"Connect a Deriv account before requesting historical candles"});
+  const symbol=String(b.symbol||"");
+  const granularity=Number(b.granularity||60);
+  const candles=await deriv.history(symbol,500,granularity);
+  const closed=candles.length>1?candles.slice(0,-1):[];
+  const report=walkForwardBacktest(closed,{expiryBars:b.expiryBars,payoutRate:b.payoutRate,minScore:b.minScore??config.minSignalScore,minCandles:b.minCandles});
+  return json(res,200,{symbol,granularity,report,warning:"Historical candle replay is not live performance. It excludes the forming candle but does not model every Deriv execution, spread, latency or payout change."});
+}
 if(req.method==="POST"&&req.url==="/api/batch-plan"){const b=await body(req);const plan=createBatchPlan(b.markets,b.tradesPerMarket);return json(res,200,{...plan,execution:"PREVIEW_ONLY",note:"Preview only. Use scan-and-execute with explicit demo confirmation to place demo orders."});}
 if(req.method==="POST"&&req.url==="/api/proposal"){const b=await body(req);if(!deriv.connected||!activeAccount)return json(res,409,{error:"Connect a demo Options account first"});return json(res,200,{proposal:await deriv.proposal(b),approvalRequired:true});}
 if(req.method==="POST"&&req.url==="/api/buy"){
