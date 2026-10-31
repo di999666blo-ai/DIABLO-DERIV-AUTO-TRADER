@@ -960,6 +960,7 @@ class MainActivity : AppCompatActivity() {
             maxOpenPositions = positionLimit,
             maxTradesPerMarket = marketLimit,
             stakeProgressionEnabled = progressionSwitch.isChecked,
+            initialProgressionIndex = prefs.getInt("stake_progression_index", 0).coerceIn(0, 4),
             marketTradeLimits = selected.associateWith { marketQuantities[it] ?: marketLimit }
         )
         show("Checking Deriv for existing open positions before starting…")
@@ -1027,6 +1028,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveTrade(record: TradeRecord) {
+        if (record.status == "CLOSED") {
+            prefs.edit().putInt("stake_progression_index", record.progressionIndex.coerceIn(0, 4)).apply()
+        }
         if (record.status == "CLOSED" && api.connectedMode == "demo" &&
             (record.direction == "UP" || record.direction == "DOWN")) {
             prefs.edit()
