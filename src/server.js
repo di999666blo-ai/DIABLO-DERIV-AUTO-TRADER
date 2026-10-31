@@ -9,7 +9,6 @@ import {DerivClient} from "./deriv.js";
 import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
 import {walkForwardBacktest} from "./backtest.js";
-import {walkForwardBacktest} from "./backtest.js";
 
 const root=resolve(fileURLToPath(new URL("../public",import.meta.url)));
 const guard=new RiskGuard({dailyLoss:config.maxDailyLoss,tradesPerDay:config.maxTradesPerDay,cooldownMs:config.cooldownSeconds*1000,maxStake:config.maxStake,baseStake:config.defaultStake,stakeProgressionEnabled:config.stakeProgressionEnabled,stakeProgression:config.stakeProgression,maxOpenTrades:config.maxOpenTrades,maxTradesPerMarket:config.maxTradesPerMarket,consecutiveLosses:config.maxConsecutiveLosses,allowLive:config.liveTradingAck});
