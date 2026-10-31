@@ -183,6 +183,16 @@ class MainActivity : AppCompatActivity() {
         )
         val pageScreens = linkedMapOf<String, LinearLayout>()
         val pageContents = linkedMapOf<String, LinearLayout>()
+        var homeScreenRef: LinearLayout? = null
+        // Define navigation before installing any BACK or launcher click listeners.
+        var showDashboard: (String) -> Unit = { id ->
+            screenHost.removeAllViews()
+            val selected = if (id == "home") homeScreenRef else pageScreens[id]
+            if (selected != null) {
+                selected.visibility = android.view.View.VISIBLE
+                screenHost.addView(selected, FrameLayout.LayoutParams(-1, -1))
+            }
+        }
         pageTitles.forEach { (id, title) ->
             val page = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -226,19 +236,6 @@ class MainActivity : AppCompatActivity() {
             pageContents[id] = pageContent
         }
         var activePage = "trade"
-
-        var homeScreenRef: LinearLayout? = null
-        // Declare the navigation callback before wiring BACK and launcher click listeners.
-        // A local function declared later is not visible to these earlier Kotlin lambdas.
-        var showDashboard: (String) -> Unit = {}
-        showDashboard = { id ->
-            screenHost.removeAllViews()
-            val selected = if (id == "home") homeScreenRef else pageScreens[id]
-            if (selected != null) {
-                selected.visibility = android.view.View.VISIBLE
-                screenHost.addView(selected, FrameLayout.LayoutParams(-1, -1))
-            }
-        }
 
         val homeScreen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
