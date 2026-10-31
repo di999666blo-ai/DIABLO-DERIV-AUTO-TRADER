@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test",
-    "check": "node --check src/server.js && node --check src/deriv.js && node --check src/strategy.js && node --check src/risk.js && node --check src/portfolio.js && node --check src/ledger.js"
+    "check": "node --check src/server.js && node --check src/deriv.js && node --check src/strategy.js && node --check src/risk.js && node --check src/portfolio.js && node --check src/ledger.js && node --check src/backtest.js && node --check src/config.js && node scripts/check-dashboard.js"
   },
   "dependencies": {
     "ws": "^8.18.3"
