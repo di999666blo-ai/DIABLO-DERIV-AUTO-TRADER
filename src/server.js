@@ -53,7 +53,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
         if(!available.has(symbol))continue;
         const candles=await deriv.history(symbol,100,config.autoGranularity);
         const closed=candles.length>1?candles.slice(0,-1):[];
-        const signal=analyzeCandles(closed);
+        const signal=analyzeCandles(closed,{minScore:config.minSignalScore});
         if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)continue;
         const candle=closed.at(-1);const candleKey=String(candle.epoch||candle.open||"");
         const lastKey=autoRunner.lastProcessed?.[symbol];
