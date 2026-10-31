@@ -181,7 +181,7 @@ export function confirmPrecisionEntry(tickSignal, candleSignal, symbol = "", opt
     return { ...base, reason: "Market structure is ranging after spike; stand aside" };
   }
 
-  const candleWeight = spikeMarket ? 0.20 : 0.40;
+  const candleWeight = spikeMarket ? 0.10 : 0.40;
   const tickWeight = 1 - candleWeight;
   const candlePoints = spikeMarket && candleSignal.action === "WAIT" ? 50 : candleSignal.score;
   const score = Math.round(tickSignal.score * tickWeight + candlePoints * candleWeight);
