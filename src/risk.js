@@ -6,7 +6,8 @@ export class RiskGuard {
     if (this.limits.stakeProgression.some(x => !Number.isFinite(x) || x <= 0)) throw new Error("Invalid stake progression");
     this.limits.stakeProgression = this.limits.stakeProgression.map(x => Math.min(x, this.limits.maxStake));
     this.day = this.dayKey(); this.reset(); this.stopped = true;
-    this.currentStake = Math.min(this.limits.baseStake, this.limits.maxStake);
+    this.progressionIndex = 0;
+    this.currentStake = this.limits.stakeProgressionEnabled ? this.limits.stakeProgression[0] : Math.min(this.limits.baseStake, this.limits.maxStake);
   }
   dayKey(now = new Date()) { return `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`; }
   reset() { this.trades=0; this.loss=0; this.consecutiveLosses=0; this.lastTradeAt=0; this.openTrades=0; this.openByMarket={}; }
@@ -16,7 +17,7 @@ export class RiskGuard {
     this.rollover();
     const p=Number(profit); if(!Number.isFinite(p)) return {recorded:false};
     this.openTrades=Math.max(0,this.openTrades-1); this.openByMarket[symbol]=Math.max(0,(this.openByMarket[symbol]||0)-1);
-    if(p<0){this.loss+=Math.abs(p);this.consecutiveLosses++;if(this.limits.stakeProgressionEnabled)this.currentStake=this.limits.stakeProgression[Math.max(0,this.progressionIndex-1)];this.progressionIndex=Math.max(0,(this.progressionIndex||0)-1);}
+    if(p<0){this.loss+=Math.abs(p);this.consecutiveLosses++;if(this.limits.stakeProgressionEnabled){this.progressionIndex=Math.max(0,this.progressionIndex-1);this.currentStake=this.limits.stakeProgression[this.progressionIndex];}}
     else if(p>0){this.consecutiveLosses=0;if(this.limits.stakeProgressionEnabled){this.progressionIndex=Math.min((this.progressionIndex||0)+1,this.limits.stakeProgression.length-1);this.currentStake=this.limits.stakeProgression[this.progressionIndex];}}
     if(this.loss>=this.limits.dailyLoss||this.consecutiveLosses>=this.limits.consecutiveLosses)this.emergencyStop();
     return {recorded:true,currentStake:this.currentStake,stopped:this.stopped};
