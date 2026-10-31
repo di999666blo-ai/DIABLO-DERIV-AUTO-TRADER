@@ -28,3 +28,24 @@ test("stake progression state is restored from persisted risk snapshot",()=>{
   assert.equal(restored.currentStake,3);
   assert.equal(restored.snapshot().progressionIndex,2);
 });
+
+
+test("restored progression derives stake from the clamped ladder index",()=>{
+  const limits={baseStake:1,maxStake:3,stakeProgressionEnabled:true,stakeProgression:[1,2,3,4,5]};
+  const source=new RiskGuard(limits);
+  source.restore({day:source.day,stopped:false,progressionIndex:4,currentStake:999});
+  assert.equal(source.progressionIndex,2);
+  assert.equal(source.currentStake,3);
+});
+
+test("invalid stake caps and base stakes are rejected",()=>{
+  assert.throws(()=>new RiskGuard({maxStake:0}),/maxStake/);
+  assert.throws(()=>new RiskGuard({baseStake:0}),/baseStake/);
+});
+
+test("disabled progression always restores the configured base stake",()=>{
+  const g=new RiskGuard({baseStake:2,maxStake:5,stakeProgressionEnabled:false});
+  g.restore({day:g.day,stopped:false,progressionIndex:3,currentStake:5});
+  assert.equal(g.progressionIndex,0);
+  assert.equal(g.currentStake,2);
+});
