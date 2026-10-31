@@ -167,8 +167,13 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(pageBackground)
             setPadding(16, 12, 16, 8)
         }
-        val screenHost = FrameLayout(this)
-        root.addView(screenHost, LinearLayout.LayoutParams(-1, 0, 1f))
+        val dashboardScroll = ScrollView(this).apply { isFillViewport = false }
+        val dashboardContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 24)
+        }
+        dashboardScroll.addView(dashboardContent)
+        root.addView(dashboardScroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
         val pageTitles = linkedMapOf(
             "trade" to "TRADE NOW",
@@ -186,18 +191,16 @@ class MainActivity : AppCompatActivity() {
         var homeScreenRef: LinearLayout? = null
         // Define navigation before installing any BACK or launcher click listeners.
         var showDashboard: (String) -> Unit = { id ->
-            screenHost.removeAllViews()
             val selected = if (id == "home") homeScreenRef else pageScreens[id]
-            if (selected != null) {
-                selected.visibility = android.view.View.VISIBLE
-                screenHost.addView(selected, FrameLayout.LayoutParams(-1, -1))
+            selected?.let { target ->
+                dashboardScroll.post { dashboardScroll.smoothScrollTo(0, target.top) }
             }
         }
         pageTitles.forEach { (id, title) ->
             val page = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundColor(pageBackground)
-                visibility = android.view.View.GONE
+                visibility = android.view.View.VISIBLE
             }
             val pageHeader = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -207,14 +210,6 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
             }
-            headerRow.addView(Button(this).apply {
-                text = "← BACK"
-                isAllCaps = false
-                textSize = 10f
-                setTextColor(red)
-                background = rounded(0xFF111111.toInt(), red, 8f)
-                setOnClickListener { showDashboard("home") }
-            }, LinearLayout.LayoutParams(-2, 42))
             headerRow.addView(TextView(this).apply {
                 text = title
                 textSize = 16f
@@ -225,15 +220,14 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(0, -2, 1f))
             pageHeader.addView(headerRow)
             page.addView(pageHeader)
-            val scroll = ScrollView(this).apply { isFillViewport = false }
             val pageContent = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(12, 4, 12, 22)
             }
-            scroll.addView(pageContent)
-            page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            page.addView(pageContent, LinearLayout.LayoutParams(-1, -2))
             pageScreens[id] = page
             pageContents[id] = pageContent
+            dashboardContent.addView(page, LinearLayout.LayoutParams(-1, -2))
         }
         var activePage = "trade"
 
@@ -325,14 +319,14 @@ class MainActivity : AppCompatActivity() {
         }
         homeScreen.addView(launcherGrid, LinearLayout.LayoutParams(-1, -2))
         homeScreen.addView(TextView(this).apply {
-            text = "Each icon opens its own dashboard. Use BACK to return to the launcher."
+            text = "Quick jumps take you to sections on this one continuous, scrollable dashboard."
             textSize = 10f
             gravity = Gravity.CENTER
             setTextColor(muted)
             setPadding(4, 12, 4, 4)
         })
         homeScreenRef = homeScreen
-        screenHost.addView(homeScreen, FrameLayout.LayoutParams(-1, -1))
+        dashboardContent.addView(homeScreen, 0, LinearLayout.LayoutParams(-1, -2))
 
         fun section(title: String, subtitle: String = ""): LinearLayout {
             val card = LinearLayout(this).apply {
