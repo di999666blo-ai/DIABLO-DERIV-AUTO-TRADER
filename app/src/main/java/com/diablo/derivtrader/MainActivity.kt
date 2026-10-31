@@ -438,6 +438,26 @@ class MainActivity : AppCompatActivity() {
 
         activePage = "settings"
         val connection = section("01  /  DERIV CONNECTION", "Deriv PAT is stored encrypted on this phone. Never paste a GitHub PAT into the app or chat.")
+        label(connection, "Account mode")
+        modeSpinner = Spinner(this)
+        modeSpinner.adapter = darkSpinnerAdapter(
+            if (realUnlocked) listOf("DEMO ACCOUNT", "REAL — UNLOCKED")
+            else listOf("DEMO ACCOUNT", "REAL — LOCKED")
+        )
+        modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position == 1 && !realUnlocked) {
+                    Toast.makeText(this@MainActivity, "Real mode locked until Demo verification and explicit approval.", Toast.LENGTH_LONG).show()
+                    modeSpinner.setSelection(0)
+                    selectedMode = "demo"
+                } else selectedMode = if (position == 1) "real" else "demo"
+            }
+        }
+        connection.addView(modeSpinner, LinearLayout.LayoutParams(-1, 48))
+        action(connection, if (realUnlocked) "REAL MODE UNLOCKED" else "VERIFY / UNLOCK REAL MODE") {
+            requestRealUnlock()
+        }
         label(connection, "Deriv Personal Access Token (PAT)")
         pat = field(connection, "Paste your Deriv PAT with trade permission", secret = true)
         label(connection, "Deriv app ID")
