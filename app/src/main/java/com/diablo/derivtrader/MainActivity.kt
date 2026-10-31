@@ -228,7 +228,10 @@ class MainActivity : AppCompatActivity() {
         var activePage = "trade"
 
         var homeScreenRef: LinearLayout? = null
-        fun showDashboard(id: String) {
+        // Declare the navigation callback before wiring BACK and launcher click listeners.
+        // A local function declared later is not visible to these earlier Kotlin lambdas.
+        var showDashboard: (String) -> Unit = {}
+        showDashboard = { id ->
             screenHost.removeAllViews()
             val selected = if (id == "home") homeScreenRef else pageScreens[id]
             if (selected != null) {
