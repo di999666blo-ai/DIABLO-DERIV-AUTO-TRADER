@@ -14,7 +14,18 @@ export class RiskGuard {
   }
   dayKey(now = new Date()) { return `${now.getFullYear()}-${now.getMonth()+1}-${now.getDate()}`; }
   reset() { this.trades=0; this.loss=0; this.consecutiveLosses=0; this.lastTradeAt=0; this.openTrades=0; this.openByMarket={}; }
-  rollover(now = new Date()) { const day=this.dayKey(now); if(day!==this.day){this.day=day;this.reset();} }
+  rollover(now = new Date()) {
+    const day=this.dayKey(now);
+    if(day!==this.day){
+      // Daily counters reset at midnight; outstanding contracts still consume exposure.
+      const openTrades=this.openTrades;
+      const openByMarket=this.openByMarket;
+      this.day=day;
+      this.reset();
+      this.openTrades=openTrades;
+      this.openByMarket=openByMarket;
+    }
+  }
   recordTrade({symbol="UNKNOWN"}={}) { this.rollover(); this.trades++; this.lastTradeAt=Date.now(); this.openTrades++; this.openByMarket[symbol]=(this.openByMarket[symbol]||0)+1; return this.currentStake; }
   recordClosedTrade(profit,symbol="UNKNOWN") {
     this.rollover();
@@ -44,18 +55,31 @@ export class RiskGuard {
   arm(){this.stopped=false;}
   restore(saved){
     if(!saved||typeof saved!=="object")return;
-    this.day=saved.day||this.day;this.rollover();
-    for(const k of ["trades","consecutiveLosses","lastTradeAt","openTrades"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);
-    if(Number.isFinite(Number(saved.dailyLoss)))this.loss=Number(saved.dailyLoss);else if(Number.isFinite(Number(saved.loss)))this.loss=Number(saved.loss);
-    // The configured ladder is authoritative: restore the index, then derive the stake from it.
-    // This prevents a stale or edited currentStake value from bypassing the configured progression cap.
+    const today=this.dayKey();
+    const sameDay=saved.day===today;
+    this.day=today;
+    this.reset();
+    // Restore daily counters only for the current day.
+    if(sameDay){
+      for(const k of ["trades","consecutiveLosses","lastTradeAt"])if(Number.isFinite(Number(saved[k])))this[k]=Number(saved[k]);
+      if(Number.isFinite(Number(saved.dailyLoss)))this.loss=Number(saved.dailyLoss);
+      else if(Number.isFinite(Number(saved.loss)))this.loss=Number(saved.loss);
+    }
+    // Open positions survive midnight and process restarts until Deriv settles them.
+    if(Number.isFinite(Number(saved.openTrades)))this.openTrades=Math.max(0,Math.floor(Number(saved.openTrades)));
+    if(saved.openByMarket&&typeof saved.openByMarket==="object"){
+      this.openByMarket={};
+      for(const [symbol,count] of Object.entries(saved.openByMarket)){
+        const n=Number(count);
+        if(Number.isFinite(n)&&n>0)this.openByMarket[symbol]=Math.floor(n);
+      }
+    }
     this.progressionIndex=this.limits.stakeProgressionEnabled && Number.isInteger(saved.progressionIndex)
       ? Math.max(0,Math.min(saved.progressionIndex,this.limits.stakeProgression.length-1)) : 0;
     this.currentStake=this.limits.stakeProgressionEnabled
       ? this.limits.stakeProgression[this.progressionIndex]
       : Math.min(this.limits.baseStake,this.limits.maxStake);
     if(typeof saved.stopped==="boolean")this.stopped=saved.stopped;
-    if(saved.openByMarket&&typeof saved.openByMarket==="object")this.openByMarket={...saved.openByMarket};
   }
   snapshot(){this.rollover();return{day:this.day,stopped:this.stopped,trades:this.trades,openTrades:this.openTrades,dailyLoss:this.loss,consecutiveLosses:this.consecutiveLosses,currentStake:this.currentStake,progressionIndex:this.progressionIndex||0,openByMarket:{...this.openByMarket},limits:this.limits};}
 }
