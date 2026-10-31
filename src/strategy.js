@@ -85,3 +85,54 @@ export function analyzeCandles(candles,options={}){
     note:"Score measures setup alignment; it is not a win-rate or profit probability."
   };
 }
+
+
+/**
+ * Tick-level entry confirmation. This is a setup-quality score, not a win
+ * probability. It requires a minimum sample and directional follow-through.
+ * BOOM/CRASH entries only trigger after an observed characteristic spike
+ * followed by two confirming ticks; the engine never predicts a spike.
+ */
+export function analyzeTickMomentum(ticks,symbol="",options={}){
+  const rows=(ticks||[]).map(t=>({quote:Number(t.quote??t.price),epoch:Number(t.epoch??0)}))
+    .filter(t=>Number.isFinite(t.quote)&&t.quote>0);
+  const minTicks=Math.max(10,Math.trunc(options.minTicks??14));
+  const base={action:"WAIT",score:0,reason:"Collecting tick confirmation",tickCount:rows.length,engine:"TICK_FAST"};
+  if(rows.length<minTicks)return base;
+  const changes=[];
+  for(let i=1;i<rows.length;i++)changes.push(rows[i].quote-rows[i-1].quote);
+  const abs=changes.map(Math.abs).filter(x=>x>0);
+  if(abs.length<8)return {...base,reason:"Insufficient price movement to establish tick baseline"};
+  const sorted=[...abs].sort((a,b)=>a-b),median=sorted[Math.floor(sorted.length/2)]||0;
+  if(!(median>0))return {...base,reason:"Market is stationary"};
+  const upper=symbol.toUpperCase();
+  const boom=upper.startsWith("BOOM"),crash=upper.startsWith("CRASH");
+  let direction="WAIT",score=0,reason="Tick momentum is not confirmed";
+  if(boom||crash){
+    const expected=boom?1:-1;
+    const tail=changes.slice(-8);
+    const spikeIndex=tail.findIndex(x=>Math.sign(x)===expected&&Math.abs(x)>=median*4);
+    if(spikeIndex<0)return {...base,reason:boom?"Waiting for an observed upward Boom spike":"Waiting for an observed downward Crash spike",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
+    const after=tail.slice(spikeIndex+1);
+    if(after.length<2)return {...base,reason:"Spike detected; waiting for two follow-through ticks",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
+    const spikeMove=tail[spikeIndex],follow=after.slice(0,2);
+    const held=follow.every(x=>Math.sign(x)===expected||x===0);
+    const netAfter=rows.at(-1).quote-rows[Math.max(0,rows.length-1-after.length-spikeIndex)].quote;
+    const retrace=Math.max(0,-expected*netAfter);
+    if(!held||retrace>Math.abs(spikeMove)*0.5)return {...base,reason:"Spike failed follow-through; stand aside",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
+    direction=expected>0?"UP":"DOWN";
+    score=76;
+    reason="Observed characteristic spike with two confirming follow-through ticks";
+  }else{
+    const tail=changes.slice(-8),net=tail.reduce((a,b)=>a+b,0);
+    const aligned=tail.filter(x=>Math.sign(x)===Math.sign(net)&&x!==0).length;
+    const move=Math.abs(net)/median;
+    if(aligned<6||move<3)return {...base,reason:"Waiting for sustained tick momentum"};
+    direction=net>0?"UP":"DOWN";
+    score=Math.min(90,65+aligned*2+Math.min(9,Math.floor(move)));
+    reason="Sustained tick momentum confirmed across the recent price stream";
+  }
+  const minScore=clamp(Number(options.minScore??72),60,95);
+  const action=score>=minScore?direction:"WAIT";
+  return {action,score,reason:action==="WAIT"?"Tick setup below quality threshold":reason,tickCount:rows.length,engine:"TICK_FAST",marketProfile:boom?"BOOM_SPIKE":crash?"CRASH_SPIKE":"MOMENTUM",note:"Tick score is setup quality, not a probability of profit."};
+}
