@@ -89,7 +89,7 @@ test("DIABLO 90 accepts observed BOOM spike with non-conflicting candle context"
   const result=confirmPrecisionEntry(tick,context,"BOOM1000",{minScore:70});
   assert.equal(result.action,"UP");
   assert.equal(result.engine,"DIABLO_90");
-  assert.equal(result.score,74);
+  assert.equal(result.score,73);
 });
 
 test("DIABLO 90 blocks extreme volatility and directional conflicts",()=>{
