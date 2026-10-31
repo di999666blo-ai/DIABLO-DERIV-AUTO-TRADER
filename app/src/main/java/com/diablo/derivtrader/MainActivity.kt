@@ -226,9 +226,10 @@ class MainActivity : AppCompatActivity() {
         }
         var activePage = "trade"
 
+        var homeScreenRef: LinearLayout? = null
         fun showDashboard(id: String) {
             screenHost.removeAllViews()
-            val selected = if (id == "home") homeScreen else pageScreens[id]
+            val selected = if (id == "home") homeScreenRef else pageScreens[id]
             if (selected != null) {
                 selected.visibility = android.view.View.VISIBLE
                 screenHost.addView(selected, FrameLayout.LayoutParams(-1, -1))
@@ -329,6 +330,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(muted)
             setPadding(4, 12, 4, 4)
         })
+        homeScreenRef = homeScreen
         screenHost.addView(homeScreen, FrameLayout.LayoutParams(-1, -1))
 
         fun section(title: String, subtitle: String = ""): LinearLayout {
@@ -435,9 +437,9 @@ class MainActivity : AppCompatActivity() {
         })
 
         activePage = "settings"
-        val connection = section("01  /  DERIV CONNECTION", "Credentials stay in encrypted app storage. Never send your PAT in chat.")
-        label(connection, "Personal access token")
-        pat = field(connection, "PAT with trade permission", secret = true)
+        val connection = section("01  /  DERIV CONNECTION", "Deriv PAT is stored encrypted on this phone. Never paste a GitHub PAT into the app or chat.")
+        label(connection, "Deriv Personal Access Token (PAT)")
+        pat = field(connection, "Paste your Deriv PAT with trade permission", secret = true)
         label(connection, "Deriv app ID")
         appId = field(connection, "App ID")
         label(connection, "Selected account ID")
