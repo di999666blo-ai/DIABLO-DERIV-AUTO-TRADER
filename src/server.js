@@ -123,7 +123,7 @@ if(req.method==="POST"&&req.url==="/api/scan-and-execute"){
     if(!available.has(symbol)){signals.push({symbol,action:"WAIT",reason:"Market unavailable for this account"});continue;}
     try{
       const candles=await deriv.history(symbol,100,Number(b.granularity||60));
-      const signal=analyzeCandles(candles);
+      const signal=analyzeCandles(candles,{minScore:config.minSignalScore});
       signals.push({symbol,...signal});
     }catch(error){signals.push({symbol,action:"WAIT",reason:"Market analysis failed: "+error.message});}
   }
