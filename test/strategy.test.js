@@ -41,3 +41,33 @@ test("user-configurable warmup and threshold are respected",()=>{
   const result=analyzeCandles(rows,{minCandles:35,minScore:95});
   assert.ok(["UP","DOWN","WAIT"].includes(result.action));
 });
+
+
+import { analyzeTickMomentum } from "../src/strategy.js";
+
+test("fast tick engine confirms sustained momentum without waiting for candle close",()=>{
+  const ticks=Array.from({length:18},(_,i)=>({quote:100+i*0.12,epoch:i+1}));
+  const result=analyzeTickMomentum(ticks,"R_100");
+  assert.equal(result.action,"UP");
+  assert.equal(result.engine,"TICK_FAST");
+});
+
+test("BOOM profile waits for an observed upward spike and follow-through",()=>{
+  const quotes=[100,100.01,99.99,100.02,100.01,100.03,100.02,100.01,100.02,100.03,100.50,100.55,100.60,100.66,100.70];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch} )),"BOOM1000");
+  assert.equal(result.action,"UP");
+  assert.equal(result.marketProfile,"BOOM_SPIKE");
+});
+
+test("CRASH profile waits for an observed downward spike and follow-through",()=>{
+  const quotes=[100,100.01,99.99,100.02,100.01,100.03,100.02,100.01,100.02,100.03,99.50,99.45,99.40,99.34,99.30];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch})),"CRASH1000");
+  assert.equal(result.action,"DOWN");
+  assert.equal(result.marketProfile,"CRASH_SPIKE");
+});
+
+test("BOOM/CRASH do not predict spikes when no characteristic impulse occurred",()=>{
+  const ticks=Array.from({length:20},(_,i)=>({quote:100+i*0.01,epoch:i}));
+  assert.equal(analyzeTickMomentum(ticks,"BOOM1000").action,"WAIT");
+  assert.equal(analyzeTickMomentum(ticks,"CRASH1000").action,"WAIT");
+});
