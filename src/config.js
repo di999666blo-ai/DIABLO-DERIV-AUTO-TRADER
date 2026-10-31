@@ -27,5 +27,7 @@ export const config = Object.freeze({
   cooldownSeconds: Math.trunc(num("COOLDOWN_SECONDS", 120)),
   defaultStake: num("DEFAULT_STAKE", 1),
   maxStake: num("MAX_STAKE", 5),
+  stakeProgressionEnabled: process.env.STAKE_PROGRESSION_ENABLED === "true",
+  stakeProgression: (process.env.STAKE_PROGRESSION || "1,2,3,4,5").split(",").map(x => Number(x.trim())).filter(x => Number.isFinite(x) && x > 0),
   allowedOrigins: (process.env.ALLOWED_ORIGINS || "http://127.0.0.1:8787,http://localhost:8787").split(",").map(x => x.trim())
 });
