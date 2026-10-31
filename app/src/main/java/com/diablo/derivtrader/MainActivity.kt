@@ -166,97 +166,170 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(pageBackground)
             setPadding(16, 12, 16, 8)
         }
-        val masthead = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(2, 8, 2, 12)
-        }
-        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        brand.addView(TextView(this).apply {
-            text = "D  DIABLO"
-            textSize = 25f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(red)
-        })
-        brand.addView(TextView(this).apply {
-            text = "DERIV AUTO TRADER  /  MULTIPLIER TERMINAL"
-            textSize = 9f
-            letterSpacing = 0.12f
-            setTextColor(muted)
-        })
-        masthead.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        masthead.addView(TextView(this).apply {
-            text = "●  LOCAL"
-            textSize = 10f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(green)
-            background = rounded(0xFF09251D.toInt(), 0xFF126044.toInt(), 20f)
-            setPadding(12, 8, 12, 8)
-        })
-        root.addView(masthead)
+        val screenHost = FrameLayout(this)
+        root.addView(screenHost, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val hero = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = rounded(0xFF101B30.toInt(), 0xFF713044.toInt(), 22f)
-            setPadding(18, 16, 18, 16)
+        val pageTitles = linkedMapOf(
+            "trade" to "TRADE NOW",
+            "history" to "TRADE HISTORY",
+            "portfolio" to "PORTFOLIO",
+            "settings" to "SETTINGS / DERIV CONNECTION",
+            "charts" to "CHARTS GALLERY",
+            "risk" to "RISK MANAGER",
+            "alerts" to "ALERTS / LIVE ACTIVITY",
+            "guide" to "GUIDE MODE",
+            "analytics" to "ANALYTICS"
+        )
+        val pageScreens = linkedMapOf<String, LinearLayout>()
+        val pageContents = linkedMapOf<String, LinearLayout>()
+        pageTitles.forEach { (id, title) ->
+            val page = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(pageBackground)
+                visibility = android.view.View.GONE
+            }
+            val pageHeader = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 10, 12, 8)
+            }
+            val headerRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            headerRow.addView(Button(this).apply {
+                text = "← BACK"
+                isAllCaps = false
+                textSize = 10f
+                setTextColor(red)
+                background = rounded(0xFF111111.toInt(), red, 8f)
+                setOnClickListener { showDashboard("home") }
+            }, LinearLayout.LayoutParams(-2, 42))
+            headerRow.addView(TextView(this).apply {
+                text = title
+                textSize = 16f
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setTextColor(red)
+                gravity = Gravity.CENTER
+                setPadding(8, 0, 4, 0)
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            pageHeader.addView(headerRow)
+            page.addView(pageHeader)
+            val scroll = ScrollView(this).apply { isFillViewport = false }
+            val pageContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(12, 4, 12, 22)
+            }
+            scroll.addView(pageContent)
+            page.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            pageScreens[id] = page
+            pageContents[id] = pageContent
         }
-        hero.addView(TextView(this).apply {
-            text = "TRADING CONTROL CENTER"
-            textSize = 10f
-            letterSpacing = 0.16f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(muted)
-        })
-        hero.addView(TextView(this).apply {
-            text = "DISCIPLINE FIRST. EXECUTION SECOND."
-            textSize = 17f
-            typeface = android.graphics.Typeface.DEFAULT_BOLD
-            setTextColor(white)
-            setPadding(0, 7, 0, 8)
-        })
-        balanceView = TextView(this).apply {
-            text = "DEMO BALANCE  •  NOT CONNECTED"
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextColor(green)
-        }
-        hero.addView(balanceView)
-        val modeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 12, 0, 0)
-        }
-        modeSpinner = Spinner(this)
-        modeSpinner.adapter = darkSpinnerAdapter(if (realUnlocked) listOf("DEMO ACCOUNT", "REAL — UNLOCKED") else listOf("DEMO ACCOUNT", "REAL — LOCKED"))
-        modeSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { }
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                if (position == 1 && !realUnlocked) {
-                    Toast.makeText(this@MainActivity, "Real mode locked until Demo verification and explicit approval.", Toast.LENGTH_LONG).show()
-                    modeSpinner.setSelection(0)
-                    selectedMode = "demo"
-                } else selectedMode = if (position == 1) "real" else "demo"
+        var activePage = "trade"
+
+        fun showDashboard(id: String) {
+            screenHost.removeAllViews()
+            val selected = if (id == "home") homeScreen else pageScreens[id]
+            if (selected != null) {
+                selected.visibility = android.view.View.VISIBLE
+                screenHost.addView(selected, FrameLayout.LayoutParams(-1, -1))
             }
         }
-        modeRow.addView(modeSpinner, LinearLayout.LayoutParams(0, 48, 1f))
-        modeRow.addView(Button(this).apply {
-            text = if (realUnlocked) "REAL UNLOCKED" else "VERIFY / UNLOCK"
-            setTextColor(white)
-            textSize = 10f
-            isAllCaps = false
-            background = rounded(0xFF35101B.toInt(), red, 12f)
-            setOnClickListener { requestRealUnlock() }
-        }, LinearLayout.LayoutParams(0, 48, 1f).apply { marginStart = 8 })
-        hero.addView(modeRow)
-        root.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
 
-        val contentScroll = ScrollView(this).apply { isFillViewport = false }
-        val content = LinearLayout(this).apply {
+        val homeScreen = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 2, 0, 20)
+            setBackgroundColor(pageBackground)
+            setPadding(12, 14, 12, 12)
         }
-        contentScroll.addView(content)
-        root.addView(contentScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        homeScreen.addView(TextView(this).apply {
+            text = "😈 DIABLO"
+            textSize = 27f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(red)
+            setShadowLayer(12f, 0f, 0f, red)
+            setPadding(0, 14, 0, 4)
+        })
+        homeScreen.addView(TextView(this).apply {
+            text = "DERIV AUTO TRADER  •  HOME LAUNCHER"
+            textSize = 9f
+            letterSpacing = 0.12f
+            gravity = Gravity.CENTER
+            setTextColor(red)
+            setPadding(0, 0, 0, 14)
+        })
+        balanceView = TextView(this).apply {
+            text = "● BOT STANDBY     DEMO BALANCE: NOT CONNECTED"
+            textSize = 10f
+            setTextColor(green)
+            background = rounded(0xFF0A0A0A.toInt(), 0x66FF0F0F, 8f)
+            setPadding(10, 12, 10, 12)
+        }
+        homeScreen.addView(balanceView)
+        homeScreen.addView(TextView(this).apply {
+            text = "SELECT A DASHBOARD"
+            textSize = 10f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            letterSpacing = 0.12f
+            setTextColor(muted)
+            gravity = Gravity.CENTER
+            setPadding(0, 18, 0, 8)
+        })
+        val launcherGrid = GridLayout(this).apply {
+            columnCount = 3
+            rowCount = 3
+            useDefaultMargins = false
+        }
+        val launcherItems = listOf(
+            Triple("⚡", "Trade Now", "trade"),
+            Triple("⏱", "Trade History", "history"),
+            Triple("💼", "Portfolio", "portfolio"),
+            Triple("⚙", "Settings", "settings"),
+            Triple("📊", "Charts Gallery", "charts"),
+            Triple("🛡", "Risk Manager", "risk"),
+            Triple("🔔", "Alerts", "alerts"),
+            Triple("📖", "Guide Mode", "guide"),
+            Triple("📈", "Analytics", "analytics")
+        )
+        launcherItems.forEach { (icon, labelText, pageId) ->
+            val tile = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                background = rounded(0xFF0F0F0F.toInt(), red, 10f)
+                setPadding(4, 15, 4, 15)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showDashboard(pageId) }
+            }
+            tile.addView(TextView(this).apply {
+                text = icon
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(red)
+                setShadowLayer(10f, 0f, 0f, red)
+            })
+            tile.addView(TextView(this).apply {
+                text = labelText
+                textSize = 9f
+                gravity = Gravity.CENTER
+                setTextColor(white)
+                setPadding(0, 6, 0, 0)
+            })
+            launcherGrid.addView(tile, GridLayout.LayoutParams().apply {
+                width = 0
+                height = -2
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                setMargins(4, 4, 4, 4)
+            })
+        }
+        homeScreen.addView(launcherGrid, LinearLayout.LayoutParams(-1, -2))
+        homeScreen.addView(TextView(this).apply {
+            text = "Each icon opens its own dashboard. Use BACK to return to the launcher."
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(muted)
+            setPadding(4, 12, 4, 4)
+        })
+        screenHost.addView(homeScreen, FrameLayout.LayoutParams(-1, -1))
 
         fun section(title: String, subtitle: String = ""): LinearLayout {
             val card = LinearLayout(this).apply {
@@ -276,7 +349,7 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(muted)
                 setPadding(0, 3, 0, 10)
             })
-            content.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
+            pageContents[activePage]?.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 12 })
             return card
         }
         fun label(parent: LinearLayout, text: String) {
@@ -332,6 +405,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-1, 48).apply { topMargin = 8 })
         }
 
+        activePage = "trade"
         val overview = section("LIVE OVERVIEW", "Live account state and trading engine status")
         val overviewGrid = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         fun stat(title: String, value: String, valueColor: Int): LinearLayout {
@@ -360,6 +434,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(2, 10, 2, 0)
         })
 
+        activePage = "settings"
         val connection = section("01  /  DERIV CONNECTION", "Credentials stay in encrypted app storage. Never send your PAT in chat.")
         label(connection, "Personal access token")
         pat = field(connection, "PAT with trade permission", secret = true)
@@ -390,6 +465,7 @@ class MainActivity : AppCompatActivity() {
         action(connection, "CONNECT SELECTED ACCOUNT", true) { connect() }
         connectionStatusView?.text = "Ready. Load accounts, select the correct account, then connect."
 
+        activePage = "trade"
         val marketsCard = section("02  /  MARKET SCANNER", "Choose active Deriv symbols. Multiplier availability is checked per market.")
         marketSpinner = Spinner(this)
         marketSpinner.adapter = darkSpinnerAdapter(listOf("Load markets first"))
@@ -406,6 +482,7 @@ class MainActivity : AppCompatActivity() {
         }
         marketsCard.addView(marketStatusView)
 
+        activePage = "risk"
         val risk = section("03  /  RISK ENGINE", "Set limits before starting. Values are in the account currency unless stated.")
         label(risk, "Stake per trade")
         stake = field(risk, "Stake", "1.00")
@@ -436,6 +513,7 @@ class MainActivity : AppCompatActivity() {
         }
         risk.addView(progressionSwitch)
 
+        activePage = "trade"
         val execution = section("04  /  EXECUTION", "Multiple independent contracts. Emergency stop prevents new entries.")
         action(execution, "START AUTOMATIC SCALPING", true) { startTrading() }
         action(execution, "EMERGENCY STOP / DISCONNECT") {
@@ -464,6 +542,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(2, 12, 2, 0)
         })
 
+        activePage = "alerts"
         val live = section("05  /  LIVE BOT ACTIVITY", "Watch real Deriv contract events: entry, live P/L, close, win or loss.")
         liveActivityView = TextView(this).apply {
             text = "WAITING FOR BOT EVENTS. Start the scanner in Demo to see live activity here."
@@ -476,6 +555,7 @@ class MainActivity : AppCompatActivity() {
         }
         live.addView(liveActivityView)
 
+        activePage = "analytics"
         val stats = section("06  /  PERFORMANCE", "Calculated from locally recorded settled contracts")
         statsView = TextView(this).apply {
             setTextColor(white)
@@ -486,6 +566,7 @@ class MainActivity : AppCompatActivity() {
         }
         stats.addView(statsView)
 
+        activePage = "history"
         val history = section("07  /  TRADE HISTORY", "Most recent recorded contracts")
         historyView = TextView(this).apply {
             setTextColor(white)
@@ -496,6 +577,7 @@ class MainActivity : AppCompatActivity() {
         }
         history.addView(historyView)
 
+        activePage = "portfolio"
         val portfolio = section("PORTFOLIO / OPEN POSITIONS", "Actual open contracts returned by your connected Deriv account.")
         portfolioView = TextView(this).apply {
             text = "Connect your Deriv account, then refresh to load live open positions."
@@ -509,37 +591,34 @@ class MainActivity : AppCompatActivity() {
         portfolio.addView(portfolioView)
         action(portfolio, "REFRESH OPEN POSITIONS") { refreshPortfolio() }
 
-        // The app currently uses one native Activity with real, populated dashboard sections.
-        // Bottom navigation scrolls to those sections; it does not create empty placeholder fragments.
-        val bottomNav = BottomNavigationView(this).apply {
-            setBackgroundColor(0xFF0A0D14.toInt())
-            itemIconTintList = android.content.res.ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(red, muted)
-            )
-            itemTextColor = itemIconTintList
-            labelVisibilityMode = com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
-            val targets = linkedMapOf<Int, android.view.View>()
-            fun addDestination(title: String, icon: Int, target: android.view.View) {
-                val id = android.view.View.generateViewId()
-                menu.add(Menu.NONE, id, menu.size(), title).setIcon(icon)
-                targets[id] = target
-            }
-            addDestination("Markets", android.R.drawable.ic_menu_search, marketsCard)
-            addDestination("Risk", android.R.drawable.ic_lock_lock, risk)
-            addDestination("Portfolio", android.R.drawable.ic_menu_agenda, portfolio)
-            addDestination("Live", android.R.drawable.ic_media_play, live)
-            addDestination("Connect", android.R.drawable.ic_menu_manage, connection)
-            setOnItemSelectedListener { item ->
-                val target = targets[item.itemId] ?: return@setOnItemSelectedListener false
-                contentScroll.post {
-                    val y = (target.top - content.paddingTop).coerceAtLeast(0)
-                    contentScroll.smoothScrollTo(0, y)
-                }
-                true
-            }
+        activePage = "charts"
+        val chartsInfo = section("CHARTS GALLERY", "Market chart workspace")
+        chartsInfo.addView(TextView(this).apply {
+            text = "This build does not yet contain an in-app chart renderer or saved chart gallery. No sample chart is shown as live market data. Use the Deriv chart for visual price analysis while this workspace is being built."
+            textSize = 11f
+            setTextColor(muted)
+            setPadding(2, 10, 2, 4)
+        })
+        activePage = "guide"
+        val guide = section("HOW TO START SAFELY", "Follow these steps in order")
+        listOf(
+            "1. Open Settings and enter your Deriv Personal Access Token (PAT) and App ID.",
+            "2. Load accounts, select a DEMO account, then connect.",
+            "3. Open Trade Now, load active markets and select the symbols to scan.",
+            "4. Open Risk Manager and set stake, take profit, stop loss and exposure limits.",
+            "5. Return to Trade Now and start automatic scalping only after the feed is live.",
+            "6. Monitor Alerts, Portfolio, Trade History and Analytics. Emergency Stop blocks new entries."
+        ).forEach { instruction ->
+            guide.addView(TextView(this).apply {
+                text = instruction
+                textSize = 11f
+                setTextColor(white)
+                background = rounded(0xFF0C0C0C.toInt(), 0x66FF0F0F, 8f)
+                setPadding(12, 12, 12, 12)
+            }, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 8 })
         }
-        root.addView(bottomNav, LinearLayout.LayoutParams(-1, (64 * resources.displayMetrics.density).toInt()))
+
+        showDashboard("home")
 
         pat.setText(prefs.getString("pat", ""))
         appId.setText(prefs.getString("appId", ""))
