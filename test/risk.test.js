@@ -82,3 +82,36 @@ test("restore from yesterday clears daily counters but keeps unsettled positions
   g.arm();
   assert.equal(g.canTrade({autoTrade:true,mode:"demo",symbol:"frxGBPUSD",ignoreCooldown:true}).reason,"Account-wide open-trade limit reached");
 });
+
+
+test("ledger ignores terminal updates for contracts it never opened",async()=>{
+  const {mkdtemp,rm}=await import("node:fs/promises");
+  const {join}=await import("node:path");
+  const {tmpdir}=await import("node:os");
+  const {TradeLedger}=await import("../src/ledger.js");
+  const dir=await mkdtemp(join(tmpdir(),"diablo-ledger-"));
+  try{
+    const ledger=new TradeLedger(join(dir,"state.json"));await ledger.load();
+    const result=await ledger.settle({contract_id:123,is_sold:1,profit:4,status:"won"});
+    assert.equal(result.recorded,false);assert.equal(result.unknown,true);
+    assert.equal(ledger.snapshot().closed.length,0);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test("ledger records a tracked settlement exactly once",async()=>{
+  const {mkdtemp,rm}=await import("node:fs/promises");
+  const {join}=await import("node:path");
+  const {tmpdir}=await import("node:os");
+  const {TradeLedger}=await import("../src/ledger.js");
+  const dir=await mkdtemp(join(tmpdir(),"diablo-ledger-"));
+  try{
+    const ledger=new TradeLedger(join(dir,"state.json"));await ledger.load();
+    await ledger.recordOpen({contract_id:456,symbol:"frxEURUSD",stake:1});
+    const update={contract_id:456,is_sold:1,profit:2,status:"won"};
+    assert.equal((await ledger.settle(update)).recorded,true);
+    const duplicate=await ledger.settle(update);
+    assert.equal(duplicate.recorded,false);assert.equal(duplicate.duplicate,true);
+    assert.equal(ledger.snapshot().closed.length,1);
+    assert.equal(Object.keys(ledger.snapshot().open).length,0);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
