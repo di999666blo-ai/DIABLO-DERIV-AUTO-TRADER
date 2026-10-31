@@ -85,6 +85,10 @@ class TradingController(
     private var emergencyStop = false
     private var watchdog: ScheduledExecutorService? = null
     private val staleMarkets = hashSetOf<String>()
+    private val receivedTickCounts = hashMapOf<String, Long>()
+    private val lastTickWallMillis = hashMapOf<String, Long>()
+    private val lastDiagnosticAtMillis = hashMapOf<String, Long>()
+    private val requiredClosedCandles = 23
 
     @Synchronized fun start(selectedSymbol: String, accountCurrency: String = config.currency) =
         start(listOf(selectedSymbol), accountCurrency)
@@ -103,6 +107,7 @@ class TradingController(
         }
         activeSymbols.clear(); activeSymbols.addAll(requested)
         subscriptions.clear(); builders.clear(); candleHistory.clear(); seenSignals.clear()
+        receivedTickCounts.clear(); lastTickWallMillis.clear(); lastDiagnosticAtMillis.clear()
         pendingSymbols.clear(); marketTradeCounts.clear()
         requested.forEach { symbol ->
             builders[symbol] = TickCandleBuilder(config.candleSeconds)
@@ -155,7 +160,7 @@ class TradingController(
                     tickResult.onSuccess { tickResponse ->
                         val id = tickResponse.optJSONObject("subscription")?.optString("id")
                         synchronized(this) { if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id }
-                        onStatus("$symbol live tick feed active.")
+                        onStatus("$symbol tick subscription acknowledged. Waiting for incoming tick messages…")
                         checkNextMarket(symbols, index + 1)
                     }.onFailure {
                         synchronized(this) { activeSymbols.remove(symbol) }
@@ -177,16 +182,34 @@ class TradingController(
         val tick = message.optJSONObject("tick") ?: return
         val symbol = tick.optString("symbol")
         if (symbol !in activeSymbols) return
-        synchronized(this) { staleMarkets.remove(symbol) }
+        val nowMillis = System.currentTimeMillis()
+        val tickCount = synchronized(this) {
+            staleMarkets.remove(symbol)
+            receivedTickCounts[symbol] = (receivedTickCounts[symbol] ?: 0L) + 1L
+            lastTickWallMillis[symbol] = nowMillis
+            receivedTickCounts[symbol] ?: 0L
+        }
         val quote = tick.optDouble("quote", Double.NaN)
         val epoch = tick.optLong("epoch", 0L)
-        val candle = builders[symbol]?.onTick(MarketTick(epoch, quote)) ?: return
+        val candle = builders[symbol]?.onTick(MarketTick(epoch, quote))
+        if (candle == null) {
+            synchronized(this) {
+                val lastDiagnostic = lastDiagnosticAtMillis[symbol] ?: 0L
+                if (nowMillis - lastDiagnostic >= 5_000L) {
+                    lastDiagnosticAtMillis[symbol] = nowMillis
+                    val closedCount = candleHistory[symbol]?.size ?: 0
+                    onStatus("$symbol | FEED LIVE | ticks $tickCount | closed candles $closedCount/$requiredClosedCandles | collecting closed candles")
+                }
+            }
+            return
+        }
         synchronized(this) {
             if (symbol in staleMarkets) return
             val candles = candleHistory[symbol] ?: return
             candles.add(candle); if (candles.size > 300) candles.removeAt(0)
             val signal = engine.evaluate(candles.toList())
-            onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | ${signal.reason}")
+            val lastTickAge = ((System.currentTimeMillis() - (lastTickWallMillis[symbol] ?: System.currentTimeMillis())) / 1000L).coerceAtLeast(0L)
+            onStatus("$symbol | ${signal.direction} | setup ${signal.strength}/100 | candles ${candles.size}/$requiredClosedCandles | ticks ${receivedTickCounts[symbol] ?: 0L} | last tick ${lastTickAge}s | ${signal.reason}")
             if (signal.direction == TradeDirection.WAIT || seenSignals[symbol]?.add(signal.candleEpoch) != true) return
             if (!running.get() || symbol in pendingSymbols || positions.values.any { it.symbol == symbol }) return
             val pairLimit = config.marketTradeLimits[symbol] ?: config.maxTradesPerMarket
@@ -288,7 +311,7 @@ class TradingController(
                 realizedPnl += profit
                 if (profit < 0.0) {
                     consecutiveLosses++
-                    progressionIndex = 0
+                    progressionIndex = (progressionIndex - 1).coerceAtLeast(0)
                 } else if (profit > 0.0) {
                     consecutiveLosses = 0
                     if (config.stakeProgressionEnabled)
@@ -303,7 +326,13 @@ class TradingController(
                     contract.optDouble("buy_price", position.buyPrice),
                     contract.optDouble("sell_price", contract.optDouble("bid_price", 0.0)),
                     profit, "CLOSED", contract.optString("status")))
-                onStatus("Contract $id settled. P/L $profit | Session $realizedPnl | Open ${positions.size}.")
+                val nextStake = if (config.stakeProgressionEnabled)
+                    config.stakeProgression[progressionIndex.coerceIn(0, config.stakeProgression.lastIndex)]
+                else config.stake
+                val progressionNote = if (config.stakeProgressionEnabled)
+                    " | next stake $nextStake (${if (profit > 0.0) "step up" else if (profit < 0.0) "step down" else "unchanged"})"
+                else ""
+                onStatus("Contract $id settled. P/L $profit | Session $realizedPnl | Open ${positions.size}$progressionNote.")
                 if (realizedPnl <= -config.dailyLossLimit ||
                     consecutiveLosses >= config.maxConsecutiveLosses ||
                     tradesToday >= config.maxTradesPerDay) {
