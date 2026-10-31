@@ -4,7 +4,7 @@ import {resolve,extname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {config} from "./config.js";
 import {RiskGuard} from "./risk.js";
-import {analyzeCandles,analyzeTickMomentum} from "./strategy.js";
+import {analyzeCandles,analyzeTickMomentum,confirmPrecisionEntry} from "./strategy.js";
 import {DerivClient} from "./deriv.js";
 import {createBatchPlan} from "./portfolio.js";
 import {TradeLedger} from "./ledger.js";
@@ -47,15 +47,23 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
     const runner=autoRunner;if(stopped||!runner||guard.stopped||!deriv.connected)return;
     const state=runner.tickState[symbol];if(!state)return;
     const quote=Number(tick.quote),epoch=Number(tick.epoch||0);if(!(quote>0))return;
-    if(state.ticks.length&&epoch&&epoch===state.lastEpoch)return;
-    state.lastEpoch=epoch;state.ticks.push({quote,epoch});if(state.ticks.length>40)state.ticks.shift();
+    if(state.ticks.length&&epoch&&epoch===state.lastEpoch&&quote===state.lastQuote)return;
+    state.lastEpoch=epoch;state.lastQuote=quote;state.ticks.push({quote,epoch});if(state.ticks.length>40)state.ticks.shift();
     if(state.evaluating||state.ticks.length<14)return;
-    const signal=analyzeTickMomentum(state.ticks,symbol,{minScore:config.minSignalScore});
-    state.lastSignal=signal;
-    if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)return;
+    const tickSignal=analyzeTickMomentum(state.ticks,symbol,{minScore:config.minSignalScore});
+    state.lastSignal=tickSignal;
+    if(!["UP","DOWN"].includes(tickSignal.action)||tickSignal.score<config.minSignalScore)return;
     const now=Date.now();if(now-state.lastEntryAt<Math.max(5000,config.cooldownSeconds*1000))return;
     state.evaluating=true;
     try{
+      // Refresh candles only after a qualified fast-tick candidate. The last
+      // Deriv candle is still forming, so it is excluded before confirmation.
+      const history=await deriv.history(symbol,100,config.autoGranularity);
+      const closed=history.length>1?history.slice(0,-1):[];
+      const candleSignal=analyzeCandles(closed,{minScore:config.minSignalScore});
+      const signal=confirmPrecisionEntry(tickSignal,candleSignal,symbol,{minScore:config.minSignalScore});
+      state.lastSignal=signal;
+      if(!["UP","DOWN"].includes(signal.action)||signal.score<config.minSignalScore)return;
       const stake=guard.currentStake,gate=guard.canTrade({stake,autoTrade:true,mode,symbol});
       if(!gate.ok)return;
       const proposal=await deriv.proposal({symbol,action:signal.action,stake,duration:config.autoDuration,durationUnit:config.autoDurationUnit,currency:config.autoCurrency});
@@ -79,7 +87,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
       const history=await deriv.history(symbol,100,config.autoGranularity);
       const closed=history.length>1?history.slice(0,-1):[];
       const candleContext=analyzeCandles(closed,{minScore:config.minSignalScore});
-      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
+      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastQuote:null,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
       const sub=await deriv.subscribeTicks(symbol,tick=>{evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
       autoRunner.subscriptions.push(sub);
       console.log("DIABLO tick feed subscribed",symbol,"baseline",candleContext.action);
