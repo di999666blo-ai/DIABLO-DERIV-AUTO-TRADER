@@ -144,8 +144,10 @@ export function analyzeTickMomentum(ticks,symbol="",options={}){
     const postSpikeIndex=rows.length-tail.length+spikeIndex+1;
     const postSpikeQuote=rows[postSpikeIndex]?.quote;
     if(!Number.isFinite(postSpikeQuote))return {...base,reason:"Spike reference price unavailable",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
-    const netAfter=rows.at(-1).quote-postSpikeQuote;
-    const retrace=Math.max(0,-expected*netAfter);
+    const postSpikeQuotes=rows.slice(postSpikeIndex).map(row=>row.quote);
+    const favorableExtreme=expected>0?Math.max(...postSpikeQuotes):Math.min(...postSpikeQuotes);
+    const currentQuote=rows.at(-1).quote;
+    const retrace=Math.max(0,expected>0?favorableExtreme-currentQuote:currentQuote-favorableExtreme);
     if(!held||retrace>=Math.abs(spikeMove)*0.5)return {...base,reason:"Spike failed follow-through; stand aside",marketProfile:boom?"BOOM_SPIKE":"CRASH_SPIKE"};
     direction=expected>0?"UP":"DOWN";
     score=76;
