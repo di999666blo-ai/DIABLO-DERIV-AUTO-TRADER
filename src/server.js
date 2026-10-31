@@ -164,6 +164,20 @@ if(req.method==="GET"){const pathname=req.url.split("?")[0];const name=pathname=
 return json(res,404,{error:"Not found"});
 }catch(e){return json(res,400,{error:e?.message||"Unexpected error"});}});
 
-await ledger.load();
-if(ledger.state.risk)guard.restore(ledger.state.risk);
+const recoveredState=await ledger.load();
+if(recoveredState.risk){
+  // The durable ledger is the source of truth for unsettled exposure. Rebuild
+  // the risk counters from its open-contract map to repair a crash between
+  // settlement persistence and the risk snapshot write.
+  const openByMarket={};
+  for(const contract of Object.values(recoveredState.open||{})){
+    const symbol=String(contract.symbol||"UNKNOWN");
+    openByMarket[symbol]=(openByMarket[symbol]||0)+1;
+  }
+  guard.restore({
+    ...recoveredState.risk,
+    openTrades:Object.keys(recoveredState.open||{}).length,
+    openByMarket
+  });
+}
 server.listen(config.port,"127.0.0.1",()=>{console.log("DIABLO service listening on http://127.0.0.1:"+config.port);if(config.autoStart&&config.autoTrade&&config.autoAccountId&&config.autoMarkets.length){setTimeout(()=>fetch("http://127.0.0.1:"+config.port+"/api/automation/start",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({confirm:true})}).then(r=>r.json()).then(x=>console.log("DIABLO AUTO_START:",x)).catch(e=>console.error("DIABLO AUTO_START failed:",e.message)),2000).unref?.();}});
