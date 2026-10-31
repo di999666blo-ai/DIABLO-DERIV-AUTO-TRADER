@@ -97,3 +97,23 @@ test("DIABLO 90 blocks extreme volatility and directional conflicts",()=>{
   assert.equal(confirmPrecisionEntry(tick,{action:"DOWN",score:90,volatility:"HIGH"},"R_100").action,"WAIT");
   assert.equal(confirmPrecisionEntry(tick,{action:"UP",score:90,volatility:"NORMAL"},"CRASH1000").action,"WAIT");
 });
+
+
+test("BOOM spike retracement after follow-through is rejected",()=>{
+  const quotes=[100,100.01,100.00,100.02,100.01,100.03,100.02,100.04,100.03,100.05,100.04,100.06,100.56,100.61,100.66,100.36];
+  const result=analyzeTickMomentum(quotes.map((quote,epoch)=>({quote,epoch})),"BOOM1000");
+  assert.equal(result.action,"WAIT");
+  assert.match(result.reason,/follow-through|stand aside/i);
+});
+
+test("closed-candle volatility filter adapts to a sudden range expansion",()=>{
+  const rows=candles(50);
+  for(let i=36;i<50;i++){
+    const close=rows[i].close,open=rows[i].open;
+    rows[i]={...rows[i],high:Math.max(open,close)+1.5,low:Math.min(open,close)-1.5};
+  }
+  const result=analyzeCandles(rows);
+  assert.equal(result.action,"WAIT");
+  assert.equal(result.volatility,"HIGH");
+  assert.match(result.reason,/Volatility spike/);
+});
