@@ -96,7 +96,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
       if(autoRunner!==runner||stopped)return;
       runner.initializing=false;
       if(!runner.subscriptions.length){runner.error="No selected markets could be subscribed";guard.emergencyStop();await persistRisk();}
-    }catch(error){runner.initializing=false;runner.error=error.message;console.error("Autonomous initialization failed:",error.message);}
+    }catch(error){runner.initializing=false;runner.error=error.message;console.error("Autonomous initialization failed:",error.message);if(!runner.subscriptions.length){guard.emergencyStop();await persistRisk().catch(e=>console.error("Risk-state save failed:",e.message));}}
   })();
   return;
 
