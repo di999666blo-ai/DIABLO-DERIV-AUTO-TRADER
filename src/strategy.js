@@ -50,7 +50,7 @@ export function analyzeCandles(candles,options={}){
   const fastPeriod=Math.max(2,Math.trunc(options.fastPeriod??9));
   const slowPeriod=Math.max(fastPeriod+1,Math.trunc(options.slowPeriod??21));
   const rsiPeriod=Math.max(2,Math.trunc(options.rsiPeriod??14));
-  const minimum= Math.max(slowPeriod+2,rsiPeriod+2,Math.trunc(options.minCandles??35));
+  const minimum= Math.max(slowPeriod+2,rsiPeriod+2,Math.trunc(options.minCandles??(slowPeriod+2)));
   const base={action:"WAIT",score:0,reason:"Insufficient closed candles",candleCount:rows.length};
   if(rows.length<minimum)return base;
   const closes=rows.map(c=>c.close),last=rows.at(-1),prev=rows.at(-2);
