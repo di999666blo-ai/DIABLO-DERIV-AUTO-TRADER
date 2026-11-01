@@ -70,7 +70,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
     }catch(error){console.error("Tick entry failed",symbol,error.message);}
     finally{state.evaluating=false;}
   };
-  const runner=autoRunner;
+  const runner=autoRunner;runner.evaluateTick=evaluateTick;
   // Return immediately after the authenticated session is ready. Feed/history
   // warm-up continues in the background; no 35-new-candle wait blocks START.
   json(res,202,{started:true,initializing:true,mode,accountId,markets:runner.markets,engine:"continuous-tick",subscriptions:0,note:"START accepted. Live feeds are initializing; historical candles load in parallel."});
@@ -116,7 +116,7 @@ if(req.method==="POST"&&req.url==="/api/automation/market"){
   if(runner.markets.includes(symbol))return json(res,200,{updated:true,action:"already-selected",symbol});
   const active=await deriv.symbols();if(!active.some(x=>x.symbol===symbol))return json(res,400,{error:"Market is not available for this account"});
   const state=runner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext:null,received:0,lastTickAt:null,status:"SUBSCRIBING"};
-  const sub=await deriv.subscribeTicks(symbol,tick=>{state.received++;state.lastTickAt=Date.now();state.status="LIVE";});
+  const sub=await deriv.subscribeTicks(symbol,tick=>{state.received++;state.lastTickAt=Date.now();state.status="LIVE";runner.evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
   runner.subscriptions.push(sub);runner.markets.push(symbol);
   deriv.history(symbol,100,config.autoGranularity).then(rows=>{state.historyCandles=Math.max(0,rows.length-1);state.candleContext=analyzeCandles(rows.slice(0,-1),{minScore:config.minSignalScore});state.status="LIVE";}).catch(e=>{state.status="HISTORY_ERROR";state.historyError=e.message;});
   return json(res,202,{updated:true,action,symbol,status:"LIVE_FEED_WARMING",markets:runner.markets});
