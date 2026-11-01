@@ -200,6 +200,17 @@ class DerivApi {
     fun portfolio(done: (Result<JSONObject>) -> Unit) =
         request(JSONObject().put("portfolio", 1), done)
 
+    /** Fetches recent raw ticks so any configured candle interval, including sub-minute bars, can be seeded. */
+    fun tickHistory(symbol: String, count: Int = 5000, done: (Result<JSONObject>) -> Unit) {
+        require(symbol.matches(Regex("[A-Za-z0-9_]+"))) { "Invalid Deriv market symbol" }
+        require(count in 100..5000) { "Historical tick count must be between 100 and 5000" }
+        request(JSONObject()
+            .put("ticks_history", symbol)
+            .put("count", count)
+            .put("end", "latest")
+            .put("style", "ticks"), done)
+    }
+
     fun candleHistory(symbol: String, granularity: Int, done: (Result<JSONObject>) -> Unit) =
         candleHistory(symbol, granularity, 100, done)
 
