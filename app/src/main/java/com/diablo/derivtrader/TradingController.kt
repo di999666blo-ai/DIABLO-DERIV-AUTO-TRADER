@@ -160,16 +160,51 @@ class TradingController(
                     onStatus("$symbol skipped: both multiplier directions unavailable.")
                     checkNextMarket(symbols, index + 1); return@onSuccess
                 }
-                api.subscribeTicks(symbol) { tickResult ->
-                    tickResult.onSuccess { tickResponse ->
-                        val id = tickResponse.optJSONObject("subscription")?.optString("id")
-                        synchronized(this) { if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id }
-                        onStatus("$symbol tick subscription acknowledged. Waiting for incoming tick messages…")
-                        checkNextMarket(symbols, index + 1)
+                // Seed the same timeframe builder with historical ticks before live processing.
+                // This avoids waiting for 35 newly-created candles after every START.
+                api.tickHistory(symbol) { historyResult ->
+                    historyResult.onSuccess { historyResponse ->
+                        val history = historyResponse.optJSONObject("history")
+                        val prices = history?.optJSONArray("prices")
+                        val times = history?.optJSONArray("times")
+                        val seeded = synchronized(this) {
+                            val builder = builders[symbol]
+                            val candles = candleHistory[symbol]
+                            if (builder == null || candles == null || prices == null || times == null ||
+                                prices.length() != times.length()) 0
+                            else {
+                                val rows = (0 until prices.length()).mapNotNull { i ->
+                                    val price = prices.optDouble(i, Double.NaN)
+                                    val epoch = times.optLong(i, 0L)
+                                    if (price.isFinite() && price > 0.0 && epoch > 0L) MarketTick(epoch, price) else null
+                                }.sortedBy { it.epochSeconds }
+                                rows.forEach { historicalTick ->
+                                    builder.onTick(historicalTick)?.let { closed ->
+                                        candles.add(closed)
+                                        if (candles.size > 300) candles.removeAt(0)
+                                    }
+                                }
+                                val samples = tickHistory[symbol] ?: arrayListOf<MarketTick>().also { tickHistory[symbol] = it }
+                                samples.addAll(rows.takeLast(64))
+                                while (samples.size > 64) samples.removeAt(0)
+                                candles.size
+                            }
+                        }
+                        onStatus("$symbol history seeded: $seeded closed candles. Connecting live feed…")
                     }.onFailure {
-                        synchronized(this) { activeSymbols.remove(symbol) }
-                        onStatus("$symbol tick subscription failed: ${it.message}")
-                        checkNextMarket(symbols, index + 1)
+                        onStatus("$symbol historical preload unavailable: ${it.message}. Live feed will start; strategy waits for sufficient candles.")
+                    }
+                    api.subscribeTicks(symbol) { tickResult ->
+                        tickResult.onSuccess { tickResponse ->
+                            val id = tickResponse.optJSONObject("subscription")?.optString("id")
+                            synchronized(this) { if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id }
+                            onStatus("$symbol live tick subscription acknowledged; engine active.")
+                            checkNextMarket(symbols, index + 1)
+                        }.onFailure {
+                            synchronized(this) { activeSymbols.remove(symbol) }
+                            onStatus("$symbol tick subscription failed: ${it.message}")
+                            checkNextMarket(symbols, index + 1)
+                        }
                     }
                 }
             }.onFailure {
