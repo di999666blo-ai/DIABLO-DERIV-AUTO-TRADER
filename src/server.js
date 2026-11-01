@@ -42,7 +42,7 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
   await deriv.connect(accountId,mode);activeAccount=accountId;activeMode=mode;for(const id of Object.keys(ledger.state.open)){try{await deriv.watchContract(id);}catch(e){console.error("Could not restore contract monitor",id,e.message);}}
   guard.arm();await persistRisk();
   let stopped=false;
-  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},tickState:{},subscriptions:[],stop:()=>{stopped=true;for(const sub of autoRunner?.subscriptions||[])deriv.unsubscribeTicks(sub.id).catch(()=>{});}};
+  autoRunner={mode,accountId,markets:[...new Set(markets)],startedAt:new Date().toISOString(),lastProcessed:{},tickState:{},marketState:{},initializing:true,error:null,subscriptions:[],stop:()=>{stopped=true;for(const sub of autoRunner?.subscriptions||[])deriv.unsubscribeTicks(sub.id).catch(()=>{});}};
   const evaluateTick=async(symbol,tick)=>{
     const runner=autoRunner;if(stopped||!runner||guard.stopped||!deriv.connected)return;
     const state=runner.tickState[symbol];if(!state)return;
@@ -70,33 +70,58 @@ if(req.method==="POST"&&req.url==="/api/automation/start"){
     }catch(error){console.error("Tick entry failed",symbol,error.message);}
     finally{state.evaluating=false;}
   };
-  try{
-    const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
-    for(const symbol of autoRunner.markets){
-      if(stopped)break;
-      if(!available.has(symbol)){console.warn("Selected market unavailable:",symbol);continue;}
-      // Prime a market baseline before accepting tick entries.
-      const history=await deriv.history(symbol,100,config.autoGranularity);
-      const closed=history.length>1?history.slice(0,-1):[];
-      const candleContext=analyzeCandles(closed,{minScore:config.minSignalScore});
-      autoRunner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext};
-      const sub=await deriv.subscribeTicks(symbol,tick=>{evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
-      autoRunner.subscriptions.push(sub);
-      console.log("DIABLO tick feed subscribed",symbol,"baseline",candleContext.action);
-    }
-    if(!autoRunner.subscriptions.length)throw Error("No selected markets could be subscribed; autonomous scanner was not started");
-  }catch(error){
-    stopped=true;for(const sub of autoRunner.subscriptions)await deriv.unsubscribeTicks(sub.id).catch(()=>{});
-    autoRunner=null;guard.emergencyStop();await persistRisk();
-    return json(res,502,{error:"Could not initialize continuous tick feeds: "+error.message});
-  }
-  return json(res,200,{started:true,mode,accountId,markets:autoRunner.markets,engine:"continuous-tick",subscriptions:autoRunner.subscriptions.length,warning:mode==="real"?"REAL MONEY: losses are possible.": "Demo account."});
+  const runner=autoRunner;
+  // Return immediately after the authenticated session is ready. Feed/history
+  // warm-up continues in the background; no 35-new-candle wait blocks START.
+  json(res,202,{started:true,initializing:true,mode,accountId,markets:runner.markets,engine:"continuous-tick",subscriptions:0,note:"START accepted. Live feeds are initializing; historical candles load in parallel."});
+  (async()=>{
+    try{
+      const active=await deriv.symbols(),available=new Set(active.map(x=>x.symbol));
+      await Promise.all(runner.markets.map(async symbol=>{
+        if(stopped||autoRunner!==runner)return;
+        if(!available.has(symbol)){runner.marketState[symbol]={status:"UNAVAILABLE",reason:"Market unavailable for this account"};return;}
+        const state=runner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext:null,received:0,lastTickAt:null,status:"SUBSCRIBING"};
+        const sub=await deriv.subscribeTicks(symbol,tick=>{state.received++;state.lastTickAt=Date.now();state.status="LIVE";evaluateTick(symbol,tick).catch(e=>console.error("Tick callback error:",e.message));});
+        runner.subscriptions.push(sub);state.status="WARMING_HISTORY";
+        try{
+          const history=await deriv.history(symbol,100,config.autoGranularity);
+          const closed=history.length>1?history.slice(0,-1):[];
+          state.candleContext=analyzeCandles(closed,{minScore:config.minSignalScore});
+          state.historyCandles=closed.length;state.status="LIVE";
+          console.log("DIABLO feed live",symbol,"ticks",state.received,"closed candles",closed.length,"baseline",state.candleContext.action);
+        }catch(error){state.status="HISTORY_ERROR";state.historyError=error.message;console.warn("Historical warm-up failed",symbol,error.message);}
+      }));
+      if(autoRunner!==runner||stopped)return;
+      runner.initializing=false;
+      if(!runner.subscriptions.length){runner.error="No selected markets could be subscribed";guard.emergencyStop();await persistRisk();}
+    }catch(error){runner.initializing=false;runner.error=error.message;console.error("Autonomous initialization failed:",error.message);}
+  })();
+  return;
+
 }
 if(req.method==="POST"&&req.url==="/api/automation/stop"){
   if(autoRunner)autoRunner.stop();autoRunner=null;guard.emergencyStop();await persistRisk();
   return json(res,200,{stopped:true,note:"New autonomous entries stopped. Existing positions remain open and settlement monitoring continues while connected."});
 }
-if(req.method==="GET"&&req.url==="/api/automation/status")return json(res,200,{running:Boolean(autoRunner),runner:autoRunner?{mode:autoRunner.mode,accountId:autoRunner.accountId,markets:autoRunner.markets,startedAt:autoRunner.startedAt,engine:"continuous-tick",subscriptions:autoRunner.subscriptions.length,tickState:Object.fromEntries(Object.entries(autoRunner.tickState).map(([k,v])=>[k,{ticks:v.ticks.length,lastSignal:v.lastSignal}]))}:null,connected:deriv.connected,risk:guard.snapshot()});
+if(req.method==="POST"&&req.url==="/api/automation/market"){
+  const b=await body(req);if(!autoRunner)return json(res,409,{error:"Start the autonomous scanner first"});
+  const symbol=String(b.symbol||"").toUpperCase(),action=b.action==="remove"?"remove":"add";
+  if(!/^[A-Z0-9_]+$/.test(symbol))return json(res,400,{error:"Invalid market symbol"});
+  const runner=autoRunner;
+  if(action==="remove"){
+    const sub=runner.subscriptions.find(x=>x.symbol===symbol);if(sub){await deriv.unsubscribeTicks(sub.id);runner.subscriptions=runner.subscriptions.filter(x=>x.symbol!==symbol);}
+    delete runner.tickState[symbol];runner.markets=runner.markets.filter(x=>x!==symbol);
+    return json(res,200,{updated:true,action,symbol,markets:runner.markets});
+  }
+  if(runner.markets.includes(symbol))return json(res,200,{updated:true,action:"already-selected",symbol});
+  const active=await deriv.symbols();if(!active.some(x=>x.symbol===symbol))return json(res,400,{error:"Market is not available for this account"});
+  const state=runner.tickState[symbol]={ticks:[],lastEpoch:0,lastEntryAt:0,evaluating:false,lastSignal:null,candleContext:null,received:0,lastTickAt:null,status:"SUBSCRIBING"};
+  const sub=await deriv.subscribeTicks(symbol,tick=>{state.received++;state.lastTickAt=Date.now();state.status="LIVE";});
+  runner.subscriptions.push(sub);runner.markets.push(symbol);
+  deriv.history(symbol,100,config.autoGranularity).then(rows=>{state.historyCandles=Math.max(0,rows.length-1);state.candleContext=analyzeCandles(rows.slice(0,-1),{minScore:config.minSignalScore});state.status="LIVE";}).catch(e=>{state.status="HISTORY_ERROR";state.historyError=e.message;});
+  return json(res,202,{updated:true,action,symbol,status:"LIVE_FEED_WARMING",markets:runner.markets});
+}
+if(req.method==="GET"&&req.url==="/api/automation/status")return json(res,200,{running:Boolean(autoRunner),runner:autoRunner?{mode:autoRunner.mode,accountId:autoRunner.accountId,markets:autoRunner.markets,startedAt:autoRunner.startedAt,engine:"continuous-tick",subscriptions:autoRunner.subscriptions.length,initializing:autoRunner.initializing,error:autoRunner.error,tickState:Object.fromEntries(Object.entries(autoRunner.tickState).map(([k,v])=>[k,{status:v.status,ticks:v.ticks.length,received:v.received,lastTickAt:v.lastTickAt,historyCandles:v.historyCandles,lastSignal:v.lastSignal,reason:v.historyError||v.lastSignal?.reason||null}]))}:null,connected:deriv.connected,risk:guard.snapshot()});
 if(req.method==="GET"&&req.url==="/api/status")return json(res,200,{name:"DIABLO DERIV AUTO TRADER",engine:config.engine,mode:config.mode,autoTradeConfigured:config.autoTrade,credentialsConfigured:deriv.credentialsReady(),connected:deriv.connected,account:activeAccount,risk:guard.snapshot(),capabilities:{marketData:true,analysis:true,proposal:deriv.connected,manualDemoBuy:deriv.connected,batchScanAndExecute:deriv.connected&&config.autoTrade,settlementStream:deriv.connected,realMoney:config.liveTradingAck,mt5:"desktop-terminal-only"}});
 if(req.method==="GET"&&req.url==="/api/ledger")return json(res,200,{ledger:ledger.snapshot()});
 if(req.method==="GET"&&req.url==="/api/accounts"){try{return json(res,200,{accounts:await deriv.accounts()});}catch(e){return json(res,400,{error:e.message});}}
