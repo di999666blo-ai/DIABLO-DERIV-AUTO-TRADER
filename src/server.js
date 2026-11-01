@@ -16,7 +16,7 @@ const ledger=new TradeLedger();
 let activeAccount=null;
 let activeMode="demo";
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-let autoRunner=null;
+let autoRunner=null;\nlet chartFeed=null;\nconst buildChartCandle=(feed,tick)=>{const epoch=Number(tick.epoch),quote=Number(tick.quote);if(!Number.isFinite(epoch)||!(quote>0))return;const bucket=Math.floor(epoch/feed.granularity)*feed.granularity;let c=feed.candles.at(-1);if(!c||c.epoch!==bucket){c={epoch:bucket,open:quote,high:quote,low:quote,close:quote};feed.candles.push(c);if(feed.candles.length>120)feed.candles.shift();}else{c.high=Math.max(c.high,quote);c.low=Math.min(c.low,quote);c.close=quote;}feed.lastTickAt=Date.now();feed.status="LIVE";};
 const json=(res,status,data)=>{res.writeHead(status,{"content-type":"application/json; charset=utf-8","cache-control":"no-store"});res.end(JSON.stringify(data));};
 const body=async req=>{let raw="";for await(const c of req){raw+=c;if(raw.length>1000000)throw Error("Request too large");}return JSON.parse(raw||"{}");};
 const persistRisk=async()=>{await ledger.saveRisk(guard.snapshot());};
@@ -103,6 +103,11 @@ if(req.method==="POST"&&req.url==="/api/automation/stop"){
   if(autoRunner)autoRunner.stop();autoRunner=null;guard.emergencyStop();await persistRisk();
   return json(res,200,{stopped:true,note:"New autonomous entries stopped. Existing positions remain open and settlement monitoring continues while connected."});
 }
+if(req.method==="POST"&&req.url==="/api/chart/subscribe"){
+ const b=await body(req),symbol=String(b.symbol||"").toUpperCase(),granularity=Number(b.granularity||60);if(!/^[A-Z0-9_]+$/.test(symbol)||![60,120,180,300,600,900,1800,3600,7200,14400,28800,86400].includes(granularity))return json(res,400,{error:"Invalid chart market or timeframe"});if(!deriv.connected)return json(res,409,{error:"Connect Deriv before opening a live tick chart"});if(chartFeed?.subscription)await deriv.unsubscribeTicks(chartFeed.subscription.id);chartFeed={symbol,granularity,candles:[],lastTickAt:null,status:"SUBSCRIBING",subscription:null};try{const sub=await deriv.subscribeTicks(symbol,tick=>buildChartCandle(chartFeed,tick));chartFeed.subscription=sub;return json(res,202,{subscribed:true,symbol,granularity,status:chartFeed.status});}catch(error){chartFeed.status="ERROR";return json(res,502,{error:error.message});}
+}
+if(req.method==="GET"&&req.url==="/api/chart/state")return json(res,200,{feed:chartFeed?{symbol:chartFeed.symbol,granularity:chartFeed.granularity,candles:chartFeed.candles,lastTickAt:chartFeed.lastTickAt,status:chartFeed.status}:null});
+if(req.method==="POST"&&req.url==="/api/chart/unsubscribe"){if(chartFeed?.subscription)await deriv.unsubscribeTicks(chartFeed.subscription.id);chartFeed=null;return json(res,200,{subscribed:false});}
 if(req.method==="POST"&&req.url==="/api/automation/market"){
   const b=await body(req);if(!autoRunner)return json(res,409,{error:"Start the autonomous scanner first"});
   const symbol=String(b.symbol||"").toUpperCase(),action=b.action==="remove"?"remove":"add";
