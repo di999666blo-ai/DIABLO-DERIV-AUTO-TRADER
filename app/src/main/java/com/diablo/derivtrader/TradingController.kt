@@ -66,6 +66,8 @@ class TradingController(
     private val candleHistory = hashMapOf<String, ArrayList<MarketCandle>>()
     private val seenSignals = hashMapOf<String, MutableSet<Long>>()
     private val tickHistory = hashMapOf<String, ArrayList<MarketTick>>()
+    private val historyLoading = hashSetOf<String>()
+    private val bufferedLiveTicks = hashMapOf<String, ArrayList<MarketTick>>()
     private val pendingSymbols = linkedSetOf<String>()
     private val positions = linkedMapOf<Long, OpenPosition>()
     private val marketTradeCounts = hashMapOf<String, Int>()
@@ -110,6 +112,7 @@ class TradingController(
         }
         activeSymbols.clear(); activeSymbols.addAll(requested)
         subscriptions.clear(); builders.clear(); candleHistory.clear(); seenSignals.clear(); tickHistory.clear()
+        historyLoading.clear(); bufferedLiveTicks.clear()
         receivedTickCounts.clear(); lastTickWallMillis.clear(); lastDiagnosticAtMillis.clear()
         pendingSymbols.clear(); marketTradeCounts.clear()
         requested.forEach { symbol ->
@@ -160,51 +163,61 @@ class TradingController(
                     onStatus("$symbol skipped: both multiplier directions unavailable.")
                     checkNextMarket(symbols, index + 1); return@onSuccess
                 }
-                // Seed the same timeframe builder with historical ticks before live processing.
-                // This avoids waiting for 35 newly-created candles after every START.
-                api.tickHistory(symbol) { historyResult ->
-                    historyResult.onSuccess { historyResponse ->
-                        val history = historyResponse.optJSONObject("history")
-                        val prices = history?.optJSONArray("prices")
-                        val times = history?.optJSONArray("times")
-                        val seeded = synchronized(this) {
-                            val builder = builders[symbol]
-                            val candles = candleHistory[symbol]
-                            if (builder == null || candles == null || prices == null || times == null ||
-                                prices.length() != times.length()) 0
-                            else {
-                                val rows = (0 until prices.length()).mapNotNull { i ->
-                                    val price = prices.optDouble(i, Double.NaN)
-                                    val epoch = times.optLong(i, 0L)
-                                    if (price.isFinite() && price > 0.0 && epoch > 0L) MarketTick(epoch, price) else null
-                                }.sortedBy { it.epochSeconds }
-                                rows.forEach { historicalTick ->
-                                    builder.onTick(historicalTick)?.let { closed ->
-                                        candles.add(closed)
-                                        if (candles.size > 300) candles.removeAt(0)
+                // Subscribe first so the feed is active while history is fetched.
+                // Buffer arriving ticks, seed history, then replay buffered ticks in timestamp order.
+                synchronized(this) { historyLoading.add(symbol); bufferedLiveTicks[symbol] = arrayListOf() }
+                api.subscribeTicks(symbol) { tickResult ->
+                    tickResult.onSuccess { tickResponse ->
+                        val id = tickResponse.optJSONObject("subscription")?.optString("id")
+                        synchronized(this) { if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id }
+                        onStatus("$symbol live feed connected; loading recent history…")
+                        api.tickHistory(symbol) { historyResult ->
+                            var seeded = 0
+                            historyResult.onSuccess { historyResponse ->
+                                val history = historyResponse.optJSONObject("history")
+                                val prices = history?.optJSONArray("prices")
+                                val times = history?.optJSONArray("times')
+                                synchronized(this) {
+                                    val builder = builders[symbol]
+                                    val candles = candleHistory[symbol]
+                                    if (builder != null && candles != null && prices != null && times != null &&
+                                        prices.length() == times.length()) {
+                                        val rows = (0 until prices.length()).mapNotNull { i ->
+                                            val price = prices.optDouble(i, Double.NaN)
+                                            val epoch = times.optLong(i, 0L)
+                                            if (price.isFinite() && price > 0.0 && epoch > 0L) MarketTick(epoch, price) else null
+                                        }.sortedBy { it.epochSeconds }
+                                        rows.forEach { historicalTick ->
+                                            builder.onTick(historicalTick)?.let { closed ->
+                                                candles.add(closed)
+                                                if (candles.size > 300) candles.removeAt(0)
+                                            }
+                                        }
+                                        val samples = tickHistory[symbol] ?: arrayListOf<MarketTick>().also { tickHistory[symbol] = it }
+                                        samples.addAll(rows.takeLast(64))
+                                        while (samples.size > 64) samples.removeAt(0)
+                                        seeded = candles.size
                                     }
                                 }
-                                val samples = tickHistory[symbol] ?: arrayListOf<MarketTick>().also { tickHistory[symbol] = it }
-                                samples.addAll(rows.takeLast(64))
-                                while (samples.size > 64) samples.removeAt(0)
-                                candles.size
+                                onStatus("$symbol history seeded: $seeded closed candles.")
+                            }.onFailure {
+                                onStatus("$symbol historical preload unavailable: ${it.message}. Live feed remains active; strategy waits for sufficient candles.")
                             }
+                            val buffered = synchronized(this) {
+                                historyLoading.remove(symbol)
+                                bufferedLiveTicks.remove(symbol)?.sortedBy { it.epochSeconds }.orEmpty()
+                            }
+                            buffered.forEach { queued ->
+                                onDerivMessage(JSONObject().put("tick", JSONObject()
+                                    .put("symbol", symbol).put("quote", queued.price).put("epoch", queued.epochSeconds)))
+                            }
+                            onStatus("$symbol live feed ready; replayed ${buffered.size} buffered ticks.")
+                            checkNextMarket(symbols, index + 1)
                         }
-                        onStatus("$symbol history seeded: $seeded closed candles. Connecting live feed…")
                     }.onFailure {
-                        onStatus("$symbol historical preload unavailable: ${it.message}. Live feed will start; strategy waits for sufficient candles.")
-                    }
-                    api.subscribeTicks(symbol) { tickResult ->
-                        tickResult.onSuccess { tickResponse ->
-                            val id = tickResponse.optJSONObject("subscription")?.optString("id")
-                            synchronized(this) { if (!id.isNullOrBlank() && running.get()) subscriptions[symbol] = id }
-                            onStatus("$symbol live tick subscription acknowledged; engine active.")
-                            checkNextMarket(symbols, index + 1)
-                        }.onFailure {
-                            synchronized(this) { activeSymbols.remove(symbol) }
-                            onStatus("$symbol tick subscription failed: ${it.message}")
-                            checkNextMarket(symbols, index + 1)
-                        }
+                        synchronized(this) { activeSymbols.remove(symbol); historyLoading.remove(symbol); bufferedLiveTicks.remove(symbol) }
+                        onStatus("$symbol tick subscription failed: ${it.message}")
+                        checkNextMarket(symbols, index + 1)
                     }
                 }
             }.onFailure {
@@ -231,6 +244,16 @@ class TradingController(
         val quote = tick.optDouble("quote", Double.NaN)
         val epoch = tick.optLong("epoch", 0L)
         val marketTick = MarketTick(epoch, quote)
+        synchronized(this) {
+            if (symbol in historyLoading) {
+                if (quote.isFinite() && quote > 0.0 && epoch > 0L) {
+                    val queue = bufferedLiveTicks[symbol] ?: arrayListOf<MarketTick>().also { bufferedLiveTicks[symbol] = it }
+                    queue.add(marketTick)
+                    while (queue.size > 2000) queue.removeAt(0)
+                }
+                return
+            }
+        }
         synchronized(this) {
             val samples = tickHistory[symbol] ?: arrayListOf<MarketTick>().also { tickHistory[symbol] = it }
             if (quote.isFinite() && quote > 0.0 && (samples.isEmpty() || samples.last() != marketTick)) {
