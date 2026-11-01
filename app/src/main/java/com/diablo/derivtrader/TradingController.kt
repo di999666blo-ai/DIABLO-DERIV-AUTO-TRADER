@@ -176,7 +176,7 @@ class TradingController(
                             historyResult.onSuccess { historyResponse ->
                                 val history = historyResponse.optJSONObject("history")
                                 val prices = history?.optJSONArray("prices")
-                                val times = history?.optJSONArray("times')
+                                val times = history?.optJSONArray("times")
                                 synchronized(this) {
                                     val builder = builders[symbol]
                                     val candles = candleHistory[symbol]
