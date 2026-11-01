@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private var selectedMode = "demo"
     private var realUnlocked = false
     private lateinit var marketSpinner: Spinner
+    private lateinit var chartMarketSpinner: Spinner
     private lateinit var stake: EditText
     private lateinit var multiplier: EditText
     private lateinit var takeProfit: EditText
@@ -616,6 +617,10 @@ class MainActivity : AppCompatActivity() {
             setTextColor(muted)
             setPadding(2, 4, 2, 8)
         })
+        chartMarketSpinner = Spinner(this)
+        chartMarketSpinner.adapter = darkSpinnerAdapter(listOf("Load active markets first"))
+        chartsInfo.addView(TextView(this).apply { text = "LIVE FEED PAIR"; textSize = 10f; setTextColor(muted); setPadding(2, 8, 2, 2) })
+        chartsInfo.addView(chartMarketSpinner, LinearLayout.LayoutParams(-1, 48))
         val chartTimeframe = Spinner(this)
         val chartPeriods = listOf("1 MINUTE" to 60, "2 MINUTES" to 120, "3 MINUTES" to 180, "5 MINUTES" to 300, "15 MINUTES" to 900, "1 HOUR" to 3600)
         chartTimeframe.adapter = darkSpinnerAdapter(chartPeriods.map { it.first })
@@ -623,7 +628,7 @@ class MainActivity : AppCompatActivity() {
         chartView = DerivCandleChartView(this)
         chartsInfo.addView(chartView, LinearLayout.LayoutParams(-1, 260).apply { topMargin = 10 })
         action(chartsInfo, "LOAD / REFRESH DERIV CANDLES", true) {
-            val symbol = selectedSymbol()
+            val symbol = markets.getOrNull(chartMarketSpinner.selectedItemPosition)?.second
             if (symbol == null) {
                 chartView.setLoading("Load active markets in Trade Now first.")
             } else if (!api.connected) {
@@ -652,7 +657,7 @@ class MainActivity : AppCompatActivity() {
         }
         chartsInfo.addView(backtestView, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 10 })
         action(chartsInfo, "RUN 500-CANDLE WALK-FORWARD BACKTEST") {
-            val symbol = selectedSymbol()
+            val symbol = markets.getOrNull(chartMarketSpinner.selectedItemPosition)?.second
             if (symbol == null) {
                 backtestView.text = "Select a Deriv market in Market Scanner first."
             } else if (!api.connected) {
@@ -966,6 +971,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     val adapter = darkSpinnerAdapter(markets.map { "${it.first} (${it.second})" })
                     marketSpinner.adapter = adapter
+                    chartMarketSpinner.adapter = darkSpinnerAdapter(markets.map { "${it.first} (${it.second})" })
+                    val preferredChartPair = selectedMarkets.firstOrNull() ?: markets.firstOrNull()?.second
+                    val chartIndex = markets.indexOfFirst { it.second == preferredChartPair }
+                    if (chartIndex >= 0) chartMarketSpinner.setSelection(chartIndex)
                     showMarketStatus(if (markets.isEmpty()) "Deriv public market catalogue returned zero symbols. Check the network and retry." else "✅ Loaded ${markets.size} public markets. Choose up to 20; account-specific MULTUP/MULTDOWN support is checked separately.")
                 }.onFailure { showMarketStatus("❌ Market load failed: ${it.message}") }
             }
